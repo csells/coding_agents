@@ -1,8 +1,4 @@
-/// Support for doing something awesome.
-///
-/// More dartdocs go here.
+/// Dart adapters for CLI coding agents (Claude Code, Codex CLI, Gemini CLI).
 library;
 
-export 'src/coding_agents_base.dart';
-
-// TODO: Export any libraries intended for clients of this package.
+export 'src/cli_adapters/adapters.dart';

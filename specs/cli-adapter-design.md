@@ -1,8 +1,11 @@
 # CLI Agent Adapter Design Specification
 
-**Version:** 1.0.0
-**Date:** December 3, 2025
-**Purpose:** Design specification for Dart adapters that wrap Claude Code, Codex CLI, and Gemini CLI, exposing CLI-specific APIs for multi-turn sessions, streaming events, tool permission handling, and session management.
+Design specification for Dart adapters that wrap Claude Code, Codex CLI, and
+Gemini CLI, exposing CLI-specific APIs for multi-turn sessions, streaming
+events, tool permission handling, and session management.
+
+> **See also:** [best-practices.md](best-practices.md) for architectural
+> guidelines that inform this design.
 
 ---
 
@@ -21,22 +24,14 @@
 
 ### 1.1 Goals
 
-- Provide Dart wrappers for three CLI coding agents: Claude Code, Codex CLI, and Gemini CLI
+- Provide Dart wrappers for three CLI coding agents: Claude Code, Codex CLI, and
+  Gemini CLI
 - Enable multi-turn sessions with streaming event output
 - Support session creation, resumption, and listing
 - Handle tool permission policies with CLI-specific mechanisms
 - Expose CLI-specific types with no normalization or shared abstractions
 
-### 1.2 Design Principles
-
-1. **CLI-specific types**: Each adapter has its own event types, config types, and session types
-2. **No shared code**: Adapters are independent; no common base classes or interfaces
-3. **Idiomatic Dart**: Use `Stream<T>` for events, `Future<T>` for async operations
-4. **Process management hidden**: Adapters internally manage process lifecycle
-5. **CWD-scoped**: Each client is initialized with a working directory; all operations are scoped to that directory
-6. **Errors as exceptions**: No try-catch wrappers; exceptions propagate to consumer
-
-### 1.3 Package Dependencies
+### 1.2 Package Dependencies
 
 - `mcp_dart`: MCP server implementation for Claude permission delegation
 - `json_annotation` / `json_serializable`: JSON serialization
@@ -96,7 +91,9 @@ Session
 
 ### 3.1 Overview
 
-Claude Code uses a **long-lived bidirectional JSONL process**. A single process handles multiple turns via stdin/stdout. The adapter spawns an internal MCP server for permission delegation.
+Claude Code uses a **long-lived bidirectional JSONL process**. A single process
+handles multiple turns via stdin/stdout. The adapter spawns an internal MCP
+server for permission delegation.
 
 ### 3.2 Types
 
@@ -729,7 +726,6 @@ class ClaudeClient {
     return [
       '-p', prompt,
       '--output-format', 'stream-json',
-      '--input-format', 'stream-json',
       if (resumeSessionId != null) ...['--resume', resumeSessionId],
       if (config.permissionMode == ClaudePermissionMode.acceptEdits)
         ...['--permission-mode', 'acceptEdits'],
@@ -772,7 +768,9 @@ class ClaudeProcessException implements Exception {
 
 ### 4.1 Overview
 
-Codex CLI uses a **process-per-turn model**. Each user message spawns a new process. Session state is persisted to disk and restored via the `resume` subcommand.
+Codex CLI uses a **process-per-turn model**. Each user message spawns a new
+process. Session state is persisted to disk and restored via the `resume`
+subcommand.
 
 ### 4.2 Types
 
@@ -1350,7 +1348,7 @@ class CodexSession {
   List<String> _buildArgs(String prompt, String threadId, CodexSessionConfig config) {
     return [
       'exec',
-      '--output-jsonl',
+      '--json',
       if (config.fullAuto) '--full-auto',
       if (config.dangerouslyBypassAll) '--dangerously-bypass-approvals-and-sandbox',
       if (!config.fullAuto && !config.dangerouslyBypassAll) ...[
@@ -1491,7 +1489,7 @@ class CodexClient {
   List<String> _buildInitialArgs(String prompt, CodexSessionConfig config) {
     return [
       'exec',
-      '--output-jsonl',
+      '--json',
       if (config.fullAuto) '--full-auto',
       if (config.dangerouslyBypassAll) '--dangerously-bypass-approvals-and-sandbox',
       if (!config.fullAuto && !config.dangerouslyBypassAll) ...[
@@ -1524,7 +1522,8 @@ class CodexClient {
 
 ### 5.1 Overview
 
-Gemini CLI uses a **process-per-turn model** similar to Codex. Each user message spawns a new process. Sessions are restored via the `--resume` flag.
+Gemini CLI uses a **process-per-turn model** similar to Codex. Each user message
+spawns a new process. Sessions are restored via the `--resume` flag.
 
 ### 5.2 Types
 
@@ -1949,10 +1948,11 @@ class GeminiSession {
   }
 
   List<String> _buildArgs(String prompt, String sessionId, GeminiSessionConfig config) {
+    // Note: Resume uses -r with actual session UUID (not "latest") and -p for prompt
     return [
       '-p', prompt,
-      '--output-format', 'stream-json',
-      '--resume', sessionId,
+      '-o', 'stream-json',
+      '-r', sessionId,  // Use actual session UUID from init event
       if (config.approvalMode == GeminiApprovalMode.yolo) '-y',
       if (config.approvalMode == GeminiApprovalMode.autoEdit) '--auto-edit',
       if (config.sandbox) '--sandbox',
@@ -2109,9 +2109,10 @@ class GeminiClient {
   }
 
   List<String> _buildInitialArgs(String prompt, GeminiSessionConfig config) {
+    // Note: Gemini CLI uses positional prompt for initial session, -p for resume
     return [
-      '-p', prompt,
-      '--output-format', 'stream-json',
+      prompt,  // Positional argument for initial prompt
+      '-o', 'stream-json',
       if (config.approvalMode == GeminiApprovalMode.yolo) '-y',
       if (config.approvalMode == GeminiApprovalMode.autoEdit) '--auto-edit',
       if (config.sandbox) '--sandbox',
@@ -2211,13 +2212,20 @@ class ClaudePermissionServer {
 
 ### 6.2 Error Handling
 
-All adapters propagate errors as exceptions:
+Per the [Don't Swallow Errors](best-practices.md) principle, all adapters
+propagate errors as exceptions:
 
 - `ClaudeProcessException`: Claude process errors
 - `CodexProcessException`: Codex process errors
 - `GeminiProcessException`: Gemini process errors
 
-Consumers should handle these at the call site.
+**Critical guidelines:**
+- Never catch exceptions silently - let them propagate so root causes can be
+  found
+- Never fill in default values for missing required data - throw instead
+- Never add timeouts to mask hanging operations - the hang is the bug to fix
+- Consumers handle exceptions at the call site where they have context to
+  respond appropriately
 
 ### 6.3 Stream Lifecycle
 
@@ -2233,9 +2241,40 @@ Consumers should handle these at the call site.
 Each adapter implements session file parsing specific to its CLI:
 
 - **Claude**: Parse JSONL, extract metadata from `user`/`assistant` type lines
-- **Codex**: Parse JSONL, extract metadata from first line and `environment_context`
+- **Codex**: Parse JSONL, extract metadata from first line and
+  `environment_context`
 - **Gemini**: Parse JSON (not JSONL), extract top-level metadata fields
+
+### 6.5 Testing Strategy
+
+Per the [TDD](best-practices.md) principle, implementation follows test-first
+development:
+
+1. **Write tests first** - define expected behavior before writing
+   implementation
+2. **Tests are silent on success** - use `expect()` for assertions, no `print()`
+   statements
+3. **No try-catch in tests** - let exceptions propagate to fail the test with
+   full stack trace
+4. **Mock process I/O** - use mock streams for unit testing without spawning
+   real CLI processes
+5. **Integration tests** - separate tests that exercise real CLI binaries
+   (require CLIs installed)
+
+**Test structure per adapter:**
+```
+test/
+├── claude/
+│   ├── claude_client_test.dart
+│   ├── claude_session_test.dart
+│   ├── claude_events_test.dart
+│   └── claude_integration_test.dart
+├── codex/
+│   └── ...
+└── gemini/
+    └── ...
+```
 
 ---
 
-*End of Design Specification v1.0.0*
+*End of Design Specification v1.1.0*

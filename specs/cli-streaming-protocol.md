@@ -1,12 +1,8 @@
 # CLI Agent Streaming Protocol Specification
 
-**Version:** 4.0.0
-**Date:** December 3, 2025
-**Purpose:** Comprehensive specification of headless stdio/JSONL streaming protocols for Claude Code, Codex CLI, and Gemini CLI with a unified abstraction layer for Dart client library implementation.
-
-> **Changelog v4.0.0:** Clarified multi-turn architecture patterns - all three CLIs support disk-based session persistence and resume. Updated invocation patterns for Codex and Gemini headless modes with resume capability.
->
-> **Changelog v3.0.0:** Complete event catalog documentation for all CLIs, permission request/response flow documentation, comprehensive event type comparison matrix.
+Comprehensive specification of headless stdio/JSONL streaming protocols for
+Claude Code, Codex CLI, and Gemini CLI with a unified abstraction layer for Dart
+client library implementation.
 
 ---
 
@@ -26,25 +22,31 @@
 
 ## 1. Executive Summary
 
-All three major AI coding CLI agents support **headless operation via stdio with JSONL (newline-delimited JSON) streaming output**. This specification documents the native streaming protocols.
+All three major AI coding CLI agents support **headless operation via stdio with
+JSONL (newline-delimited JSON) streaming output**. This specification documents
+the native streaming protocols.
 
-| CLI | Headless Command | Output Flag | Message Format |
-|-----|------------------|-------------|----------------|
-| **Claude Code** | `claude -p "prompt"` | `--output-format stream-json` | JSONL |
-| **Codex CLI** | `codex exec "prompt"` | `--output-jsonl` | JSONL |
-| **Gemini CLI** | `gemini -p "prompt"` | `--output-format stream-json` | JSONL |
+| CLI             | Headless Command      | Output Flag                   | Message Format |
+| --------------- | --------------------- | ----------------------------- | -------------- |
+| **Claude Code** | `claude -p "prompt"`  | `--output-format stream-json` | JSONL          |
+| **Codex CLI**   | `codex exec "prompt"` | `--output-jsonl`              | JSONL          |
+| **Gemini CLI**  | `gemini -p "prompt"`  | `--output-format stream-json` | JSONL          |
 
 ### Multi-Turn Architecture Comparison
 
-All three CLIs support **multi-turn conversations with session persistence**, but use different architectural patterns:
+All three CLIs support **multi-turn conversations with session persistence**,
+but use different architectural patterns:
 
-| CLI | Process Model | Session Persistence | Multi-Turn Pattern | Session Storage |
-|-----|---------------|--------------------|--------------------|-----------------|
-| **Claude Code** | Long-lived (bidirectional JSONL) | Disk | Send messages to same process via stdin | `~/.claude/sessions/` |
-| **Codex CLI** | Process-per-turn | Disk | Spawn new process with `resume <thread_id>` | `~/.codex/sessions/` |
-| **Gemini CLI** | Process-per-turn | Disk | Spawn new process with `--resume <session_id>` | `~/.gemini/tmp/<project>/chats/` |
+| CLI             | Process Model                    | Session Persistence | Multi-Turn Pattern                             | Session Storage                  |
+| --------------- | -------------------------------- | ------------------- | ---------------------------------------------- | -------------------------------- |
+| **Claude Code** | Long-lived (bidirectional JSONL) | Disk                | Send messages to same process via stdin        | `~/.claude/sessions/`            |
+| **Codex CLI**   | Process-per-turn                 | Disk                | Spawn new process with `resume <thread_id>`    | `~/.codex/sessions/`             |
+| **Gemini CLI**  | Process-per-turn                 | Disk                | Spawn new process with `--resume <session_id>` | `~/.gemini/tmp/<project>/chats/` |
 
-**Key insight:** Codex and Gemini use the **same architectural pattern** - spawn a new CLI process for each user turn, with session state persisted to disk and restored via resume flags. Claude Code is unique in supporting true bidirectional JSONL streaming within a single long-lived process.
+**Key insight:** Codex and Gemini use the **same architectural pattern** - spawn
+a new CLI process for each user turn, with session state persisted to disk and
+restored via resume flags. Claude Code is unique in supporting true
+bidirectional JSONL streaming within a single long-lived process.
 
 ### Common Architecture
 
@@ -132,29 +134,31 @@ claude -p "prompt" --output-format stream-json --include-partial-messages
 
 ### 3.2 CLI Arguments
 
-| Argument | Short | Description |
-|----------|-------|-------------|
-| `--print` | `-p` | Non-interactive/headless mode |
-| `--output-format <fmt>` | | `text`, `json`, or `stream-json` |
-| `--input-format <fmt>` | | `text` or `stream-json` |
-| `--include-partial-messages` | | Include streaming deltas |
-| `--continue` | `-c` | Resume most recent session |
-| `--resume <id>` | `-r` | Resume specific session |
-| `--dangerously-skip-permissions` | | Auto-approve all tools (YOLO) |
-| `--allowedTools <list>` | | Tools to auto-approve |
-| `--disallowedTools <list>` | | Tools to block |
-| `--permission-mode <mode>` | | Permission mode (e.g., `plan`) |
-| `--permission-prompt-tool <tool>` | | MCP tool for permission prompts |
-| `--max-turns <n>` | | Limit agentic turns |
-| `--model <model>` | | Model selection |
-| `--system-prompt <text>` | | Replace system prompt |
-| `--append-system-prompt <text>` | | Add to system prompt |
-| `--verbose` | | Detailed turn-by-turn output |
-| `--json-schema <schema>` | | Validate output against schema |
+| Argument                          | Short | Description                      |
+| --------------------------------- | ----- | -------------------------------- |
+| `--print`                         | `-p`  | Non-interactive/headless mode    |
+| `--output-format <fmt>`           |       | `text`, `json`, or `stream-json` |
+| `--input-format <fmt>`            |       | `text` or `stream-json`          |
+| `--include-partial-messages`      |       | Include streaming deltas         |
+| `--continue`                      | `-c`  | Resume most recent session       |
+| `--resume <id>`                   | `-r`  | Resume specific session          |
+| `--dangerously-skip-permissions`  |       | Auto-approve all tools (YOLO)    |
+| `--allowedTools <list>`           |       | Tools to auto-approve            |
+| `--disallowedTools <list>`        |       | Tools to block                   |
+| `--permission-mode <mode>`        |       | Permission mode (e.g., `plan`)   |
+| `--permission-prompt-tool <tool>` |       | MCP tool for permission prompts  |
+| `--max-turns <n>`                 |       | Limit agentic turns              |
+| `--model <model>`                 |       | Model selection                  |
+| `--system-prompt <text>`          |       | Replace system prompt            |
+| `--append-system-prompt <text>`   |       | Add to system prompt             |
+| `--verbose`                       |       | Detailed turn-by-turn output     |
+| `--json-schema <schema>`          |       | Validate output against schema   |
 
 ### 3.3 Input Format (stdin)
 
-Claude Code supports **continuous JSONL streaming** via stdin when using `--input-format stream-json`. This enables true multi-turn conversations within a single process.
+Claude Code supports **continuous JSONL streaming** via stdin when using
+`--input-format stream-json`. This enables true multi-turn conversations within
+a single process.
 
 **Invocation for continuous streaming:**
 ```bash
@@ -168,7 +172,8 @@ User message (send follow-up prompts):
 {"type":"message","role":"user","content":[{"type":"text","text":"Your follow-up message here"}]}
 ```
 
-The input format mirrors the output message format. Each line must be a complete JSON object.
+The input format mirrors the output message format. Each line must be a complete
+JSON object.
 
 **Multi-turn Flow:**
 1. Spawn process with `--output-format stream-json --input-format stream-json`
@@ -179,11 +184,13 @@ The input format mirrors the output message format. Each line must be a complete
 
 **Input Message Types:**
 
-| Type | Purpose | Schema |
-|------|---------|--------|
+| Type      | Purpose        | Schema                                                                      |
+| --------- | -------------- | --------------------------------------------------------------------------- |
 | `message` | User follow-up | `{"type":"message","role":"user","content":[{"type":"text","text":"..."}]}` |
 
-**Note:** Unlike Codex and Gemini CLIs, Claude Code maintains a persistent connection. Do NOT close stdin after the initial prompt if you intend to send follow-up messages.
+**Note:** Unlike Codex and Gemini CLIs, Claude Code maintains a persistent
+connection. Do NOT close stdin after the initial prompt if you intend to send
+follow-up messages.
 
 ### 3.4 Event Types
 
@@ -362,14 +369,14 @@ When `--verbose` flag is enabled, raw API streaming deltas are exposed:
 
 ### 3.6 Permission Control
 
-| Mode | Flag | Behavior |
-|------|------|----------|
-| Default (ask) | (none) | Prompt for each tool |
-| YOLO | `--dangerously-skip-permissions` | Auto-approve all |
-| Allowlist | `--allowedTools "Read,Edit"` | Auto-approve listed tools |
-| Blocklist | `--disallowedTools "Bash"` | Block listed tools |
-| Plan mode | `--permission-mode plan` | Planning only |
-| MCP Delegate | `--permission-prompt-tool <tool>` | Delegate to MCP tool |
+| Mode          | Flag                              | Behavior                  |
+| ------------- | --------------------------------- | ------------------------- |
+| Default (ask) | (none)                            | Prompt for each tool      |
+| YOLO          | `--dangerously-skip-permissions`  | Auto-approve all          |
+| Allowlist     | `--allowedTools "Read,Edit"`      | Auto-approve listed tools |
+| Blocklist     | `--disallowedTools "Bash"`        | Block listed tools        |
+| Plan mode     | `--permission-mode plan`          | Planning only             |
+| MCP Delegate  | `--permission-prompt-tool <tool>` | Delegate to MCP tool      |
 
 **Tool format examples:**
 ```bash
@@ -378,7 +385,9 @@ When `--verbose` flag is enabled, raw API streaming deltas are exposed:
 
 ### 3.7 Permission Prompt Tool (MCP Delegation)
 
-For headless orchestration, Claude Code supports delegating permission prompts to an external MCP tool via `--permission-prompt-tool <mcp_server_name>__<tool_name>`.
+For headless orchestration, Claude Code supports delegating permission prompts
+to an external MCP tool via `--permission-prompt-tool
+<mcp_server_name>__<tool_name>`.
 
 **Invocation:**
 ```bash
@@ -439,15 +448,15 @@ Deny the tool execution:
 }
 ```
 
-**Behavior values:**
-| Value | Description |
-|-------|-------------|
-| `"allow"` | Permit the tool execution |
-| `"deny"` | Block the tool execution |
-| `"allowAlways"` | Allow this tool for remainder of session |
-| `"denyAlways"` | Deny this tool for remainder of session |
+**Behavior values:** | Value | Description | |-------|-------------| | `"allow"`
+| Permit the tool execution | | `"deny"` | Block the tool execution | |
+`"allowAlways"` | Allow this tool for remainder of session | | `"denyAlways"` |
+Deny this tool for remainder of session |
 
-**Note:** When using `--permission-prompt-tool`, no permission events are emitted in the stream. The permission flow is handled entirely through the MCP tool call mechanism. The orchestrating client must implement the MCP server with the permission handling tool.
+**Note:** When using `--permission-prompt-tool`, no permission events are
+emitted in the stream. The permission flow is handled entirely through the MCP
+tool call mechanism. The orchestrating client must implement the MCP server with
+the permission handling tool.
 
 ### 3.8 Session Management
 
@@ -496,23 +505,24 @@ codex exec --output-jsonl --full-auto "Your prompt"
 
 ### 4.2 CLI Arguments
 
-| Argument | Short | Description |
-|----------|-------|-------------|
-| `exec` | | Non-interactive mode subcommand |
-| `--output-jsonl` | | Enable JSONL streaming |
-| `--output-last-message` | `-o` | Output only final message |
-| `--output-schema <file>` | | JSON schema for structured output |
-| `--ask-for-approval` | `-a` | Require approval (untrusted mode) |
-| `--full-auto` | | Auto-approve all (danger mode) |
-| `--model <name>` | | Model selection |
-| `--cd <path>` | | Working directory |
-| `--env KEY=val` | | Set environment variable |
-| `resume` | | Resume session subcommand |
-| `--last` | | Resume most recent session |
+| Argument                 | Short | Description                       |
+| ------------------------ | ----- | --------------------------------- |
+| `exec`                   |       | Non-interactive mode subcommand   |
+| `--output-jsonl`         |       | Enable JSONL streaming            |
+| `--output-last-message`  | `-o`  | Output only final message         |
+| `--output-schema <file>` |       | JSON schema for structured output |
+| `--ask-for-approval`     | `-a`  | Require approval (untrusted mode) |
+| `--full-auto`            |       | Auto-approve all (danger mode)    |
+| `--model <name>`         |       | Model selection                   |
+| `--cd <path>`            |       | Working directory                 |
+| `--env KEY=val`          |       | Set environment variable          |
+| `resume`                 |       | Resume session subcommand         |
+| `--last`                 |       | Resume most recent session        |
 
 ### 4.3 Input Format (stdin)
 
-Codex CLI does **NOT** support continuous JSONL input streaming. Each invocation processes a single prompt.
+Codex CLI does **NOT** support continuous JSONL input streaming. Each invocation
+processes a single prompt.
 
 **Input mechanism:**
 - Prompt is passed as a command-line argument to `codex exec`
@@ -537,7 +547,9 @@ codex exec --output-jsonl --resume <thread_id> "Now refactor it"
 codex exec --output-jsonl --resume <thread_id> "Add tests"
 ```
 
-**Key difference from Claude Code:** Codex requires a new process for each turn. The session state is persisted to disk (`~/.codex/sessions/`) and restored via `--resume`.
+**Key difference from Claude Code:** Codex requires a new process for each turn.
+The session state is persisted to disk (`~/.codex/sessions/`) and restored via
+`--resume`.
 
 ### 4.4 Event Types
 
@@ -767,20 +779,20 @@ Internal chain-of-thought reasoning (visible in output):
 
 **Approval Policies:**
 
-| Mode | Flag | Config Value | Behavior |
-|------|------|--------------|----------|
-| Untrusted | `-a` | `untrusted` | Prompt for sensitive commands |
-| On-request | (default) | `on-request` | Prompt on escalation |
-| On-failure | | `on-failure` | Prompt if sandbox blocks |
-| Full auto | `--full-auto` | `never` | No prompts |
+| Mode       | Flag          | Config Value | Behavior                      |
+| ---------- | ------------- | ------------ | ----------------------------- |
+| Untrusted  | `-a`          | `untrusted`  | Prompt for sensitive commands |
+| On-request | (default)     | `on-request` | Prompt on escalation          |
+| On-failure |               | `on-failure` | Prompt if sandbox blocks      |
+| Full auto  | `--full-auto` | `never`      | No prompts                    |
 
 **Sandbox Modes:**
 
-| Mode | Config Value | Write | Network |
-|------|--------------|-------|---------|
-| Read-only | `read-only` | No | No |
-| Workspace | `workspace-write` | CWD + tmp | No |
-| Full access | `danger-full-access` | All | Yes |
+| Mode        | Config Value         | Write     | Network |
+| ----------- | -------------------- | --------- | ------- |
+| Read-only   | `read-only`          | No        | No      |
+| Workspace   | `workspace-write`    | CWD + tmp | No      |
+| Full access | `danger-full-access` | All       | Yes     |
 
 **Configuration (~/.codex/config.toml):**
 ```toml
@@ -795,12 +807,16 @@ writable_roots = ["/additional/path"]
 
 **Headless Permission Handling:**
 
-Unlike Claude Code, Codex CLI does **not** emit explicit permission request/response events in the stream. Permission handling is pre-configured via:
+Unlike Claude Code, Codex CLI does **not** emit explicit permission
+request/response events in the stream. Permission handling is pre-configured
+via:
 1. Command-line flags (`--full-auto`, `-a`)
 2. Configuration file (`~/.codex/config.toml`)
 3. Sandbox enforcement (blocks disallowed operations)
 
-For fully headless operation, use `--full-auto` to skip all permission prompts. For security-conscious automation, use sandbox modes to restrict capabilities instead of relying on runtime approval.
+For fully headless operation, use `--full-auto` to skip all permission prompts.
+For security-conscious automation, use sandbox modes to restrict capabilities
+instead of relying on runtime approval.
 
 ### 4.8 Session Storage
 
@@ -854,23 +870,25 @@ gemini --resume abc123 -p "Add comprehensive tests" --output-format stream-json 
 
 ### 5.2 CLI Arguments
 
-| Argument | Short | Description |
-|----------|-------|-------------|
-| `--prompt <text>` | `-p` | Headless mode with prompt |
-| `--output-format <fmt>` | | `text`, `json`, or `stream-json` |
-| `--approval-mode <mode>` | | `default`, `auto_edit`, or `yolo` |
-| `--yolo` | `-y` | Auto-approve all |
-| `--auto-edit` | | Auto-approve file edits only |
-| `--sandbox` | | Enable Docker sandbox |
-| `--sandbox-image <img>` | | Custom sandbox image |
-| `--model <name>` | `-m` | Model selection |
-| `--resume` | | Resume session |
-| `--allowed-tools <list>` | | Tool allowlist |
-| `--debug` | `-d` | Enable debug output |
+| Argument                 | Short | Description                       |
+| ------------------------ | ----- | --------------------------------- |
+| `--prompt <text>`        | `-p`  | Headless mode with prompt         |
+| `--output-format <fmt>`  |       | `text`, `json`, or `stream-json`  |
+| `--approval-mode <mode>` |       | `default`, `auto_edit`, or `yolo` |
+| `--yolo`                 | `-y`  | Auto-approve all                  |
+| `--auto-edit`            |       | Auto-approve file edits only      |
+| `--sandbox`              |       | Enable Docker sandbox             |
+| `--sandbox-image <img>`  |       | Custom sandbox image              |
+| `--model <name>`         | `-m`  | Model selection                   |
+| `--resume`               |       | Resume session                    |
+| `--allowed-tools <list>` |       | Tool allowlist                    |
+| `--debug`                | `-d`  | Enable debug output               |
 
 ### 5.3 Input Format (stdin)
 
-Gemini CLI uses the **same process-per-turn architecture as Codex CLI**. Each invocation processes a single prompt, and multi-turn conversations require spawning new processes with the `--resume` flag.
+Gemini CLI uses the **same process-per-turn architecture as Codex CLI**. Each
+invocation processes a single prompt, and multi-turn conversations require
+spawning new processes with the `--resume` flag.
 
 **Input mechanism:**
 - Prompt is passed via `-p` flag or piped to stdin as **plain text** (not JSONL)
@@ -908,16 +926,19 @@ cat code.py | gemini -p "Review this code" --output-format stream-json
 
 **Architecture comparison:**
 
-| Aspect | Codex CLI | Gemini CLI |
-|--------|-----------|------------|
-| Process model | Process-per-turn | Process-per-turn |
-| Session persistence | `~/.codex/sessions/` | `~/.gemini/tmp/<project>/chats/` |
-| Resume flag | `resume <thread_id>` | `--resume <session_id>` |
-| Session ID source | `thread.started` event | `init` event |
-| Stdin format | Plain text | Plain text |
-| Output format | JSONL (`--output-jsonl`) | JSONL (`--output-format stream-json`) |
+| Aspect              | Codex CLI                | Gemini CLI                            |
+| ------------------- | ------------------------ | ------------------------------------- |
+| Process model       | Process-per-turn         | Process-per-turn                      |
+| Session persistence | `~/.codex/sessions/`     | `~/.gemini/tmp/<project>/chats/`      |
+| Resume flag         | `resume <thread_id>`     | `--resume <session_id>`               |
+| Session ID source   | `thread.started` event   | `init` event                          |
+| Stdin format        | Plain text               | Plain text                            |
+| Output format       | JSONL (`--output-jsonl`) | JSONL (`--output-format stream-json`) |
 
-**Key difference from Claude Code:** Both Codex and Gemini require a new process for each user turn, with session state persisted to disk and restored via resume flags. Claude Code is unique in supporting true bidirectional JSONL streaming within a single long-lived process.
+**Key difference from Claude Code:** Both Codex and Gemini require a new process
+for each user turn, with session state persisted to disk and restored via resume
+flags. Claude Code is unique in supporting true bidirectional JSONL streaming
+within a single long-lived process.
 
 ### 5.4 Event Types
 
@@ -1095,7 +1116,8 @@ The first event emitted - contains session_id for multi-turn resume:
 {"type":"result","status":"success","stats":{"total_tokens":350,"input_tokens":100,"output_tokens":250,"duration_ms":5000,"tool_calls":2},"timestamp":"2025-12-03T10:00:08.000Z"}
 ```
 
-**Note:** The `session_id` from the `init` event (`abc123-def456`) can be used to resume this session:
+**Note:** The `session_id` from the `init` event (`abc123-def456`) can be used
+to resume this session:
 ```bash
 gemini --resume abc123-def456 -p "Add tests for the login function" --output-format stream-json
 ```
@@ -1104,11 +1126,11 @@ gemini --resume abc123-def456 -p "Add tests for the login function" --output-for
 
 **Approval Modes:**
 
-| Mode | Flag | Behavior |
-|------|------|----------|
-| Default | (none) | Prompt for each tool |
-| Auto-edit | `--auto-edit` | Auto-approve file edits only |
-| YOLO | `-y` / `--yolo` | Auto-approve everything |
+| Mode      | Flag            | Behavior                     |
+| --------- | --------------- | ---------------------------- |
+| Default   | (none)          | Prompt for each tool         |
+| Auto-edit | `--auto-edit`   | Auto-approve file edits only |
+| YOLO      | `-y` / `--yolo` | Auto-approve everything      |
 
 **Per-server trust (settings.json):**
 ```json
@@ -1136,12 +1158,15 @@ gemini --resume abc123-def456 -p "Add tests for the login function" --output-for
 
 **Headless Permission Handling:**
 
-Gemini CLI does **not** emit explicit permission request/response events in the stream. Like Codex, permissions are pre-configured via:
+Gemini CLI does **not** emit explicit permission request/response events in the
+stream. Like Codex, permissions are pre-configured via:
 1. Command-line flags (`-y`, `--auto-edit`, `--approval-mode`)
 2. Settings file trust configuration
 3. Tool include/exclude lists
 
-For fully headless operation, use `-y` (yolo) mode to auto-approve all operations. There is no MCP-based permission delegation mechanism like Claude Code's `--permission-prompt-tool`.
+For fully headless operation, use `-y` (yolo) mode to auto-approve all
+operations. There is no MCP-based permission delegation mechanism like Claude
+Code's `--permission-prompt-tool`.
 
 ### 5.8 Session Management
 
@@ -1184,150 +1209,150 @@ gemini --list-sessions       # List all sessions
 
 ### 6.1 Invocation Comparison
 
-| Action | Claude Code | Codex CLI | Gemini CLI |
-|--------|-------------|-----------|------------|
-| **Headless** | `claude -p "prompt"` | `codex exec "prompt"` | `gemini -p "prompt"` |
-| **Stream JSON** | `--output-format stream-json` | `--output-jsonl` | `--output-format stream-json` |
-| **Resume** | `--resume <id>` or `-c` | `--resume <id>` or `resume --last` | `--resume` or `--resume <id>` |
-| **YOLO** | `--dangerously-skip-permissions` | `--full-auto` | `-y` / `--yolo` |
-| **Allowlist** | `--allowedTools "Tool1,Tool2"` | (config only) | `--allowed-tools "tool1,tool2"` |
+| Action          | Claude Code                      | Codex CLI                          | Gemini CLI                      |
+| --------------- | -------------------------------- | ---------------------------------- | ------------------------------- |
+| **Headless**    | `claude -p "prompt"`             | `codex exec "prompt"`              | `gemini -p "prompt"`            |
+| **Stream JSON** | `--output-format stream-json`    | `--output-jsonl`                   | `--output-format stream-json`   |
+| **Resume**      | `--resume <id>` or `-c`          | `--resume <id>` or `resume --last` | `--resume` or `--resume <id>`   |
+| **YOLO**        | `--dangerously-skip-permissions` | `--full-auto`                      | `-y` / `--yolo`                 |
+| **Allowlist**   | `--allowedTools "Tool1,Tool2"`   | (config only)                      | `--allowed-tools "tool1,tool2"` |
 
 ### 6.2 Complete Event Type Catalog
 
 #### Claude Code Events (8 types)
 
-| Event Type | Purpose | Fields | Notes |
-|------------|---------|--------|-------|
-| `init` | Session initialization | `session_id`, `timestamp` | First event emitted |
-| `message` | Text content | `role`, `content[]`, `partial?` | Supports partial streaming |
-| `tool_use` | Tool invocation request | `id`, `name`, `input` | Before tool executes |
-| `tool_result` | Tool execution result | `tool_use_id`, `content`, `is_error` | After tool completes |
-| `result` | Session completion | `status`, `session_id`, `duration_ms` | Final event |
-| `error` | Error occurred | `error.type`, `error.message` | May occur any time |
-| `system` | System event | `subtype`, varies by subtype | Subtypes: `init`, `compact_boundary` |
-| `stream_event` | Raw API delta | `event_type`, `delta`, `index` | Only with `--verbose` |
+| Event Type     | Purpose                 | Fields                                | Notes                                |
+| -------------- | ----------------------- | ------------------------------------- | ------------------------------------ |
+| `init`         | Session initialization  | `session_id`, `timestamp`             | First event emitted                  |
+| `message`      | Text content            | `role`, `content[]`, `partial?`       | Supports partial streaming           |
+| `tool_use`     | Tool invocation request | `id`, `name`, `input`                 | Before tool executes                 |
+| `tool_result`  | Tool execution result   | `tool_use_id`, `content`, `is_error`  | After tool completes                 |
+| `result`       | Session completion      | `status`, `session_id`, `duration_ms` | Final event                          |
+| `error`        | Error occurred          | `error.type`, `error.message`         | May occur any time                   |
+| `system`       | System event            | `subtype`, varies by subtype          | Subtypes: `init`, `compact_boundary` |
+| `stream_event` | Raw API delta           | `event_type`, `delta`, `index`        | Only with `--verbose`                |
 
 #### Codex CLI Events (8 types + 8 item types)
 
 **Session/Turn Events:**
 
-| Event Type | Purpose | Fields | Notes |
-|------------|---------|--------|-------|
-| `thread.started` | Session start | `thread_id` | First event emitted |
-| `turn.started` | Turn lifecycle start | (none) | Before items |
-| `turn.completed` | Turn lifecycle end | `usage` | Contains token counts |
-| `turn.failed` | Turn failure | `error.message` | On unrecoverable error |
-| `error` | Session-level error | `message` | May occur any time |
+| Event Type       | Purpose              | Fields          | Notes                  |
+| ---------------- | -------------------- | --------------- | ---------------------- |
+| `thread.started` | Session start        | `thread_id`     | First event emitted    |
+| `turn.started`   | Turn lifecycle start | (none)          | Before items           |
+| `turn.completed` | Turn lifecycle end   | `usage`         | Contains token counts  |
+| `turn.failed`    | Turn failure         | `error.message` | On unrecoverable error |
+| `error`          | Session-level error  | `message`       | May occur any time     |
 
 **Item Lifecycle Events:**
 
-| Event Type | Purpose | Fields | Notes |
-|------------|---------|--------|-------|
-| `item.started` | Item begins | `item_type` | Start of item processing |
-| `item.updated` | Item progress | `item_type`, varies | Streaming updates |
-| `item.completed` | Item finished | `item_type`, `status` | End of item processing |
+| Event Type       | Purpose       | Fields                | Notes                    |
+| ---------------- | ------------- | --------------------- | ------------------------ |
+| `item.started`   | Item begins   | `item_type`           | Start of item processing |
+| `item.updated`   | Item progress | `item_type`, varies   | Streaming updates        |
+| `item.completed` | Item finished | `item_type`, `status` | End of item processing   |
 
 **Item Types (8):**
 
-| Item Type | Purpose | Key Fields in `item.updated` |
-|-----------|---------|------------------------------|
-| `agent_message` | Assistant text | `content` |
-| `reasoning` | Chain-of-thought | `reasoning`, `summary` |
-| `command_execution` | Shell command | `command_line`, `aggregated_output` |
-| `file_change` | File modification | `changes[]` with `path`, `before`, `after` |
-| `mcp_tool_call` | MCP tool | `tool_name`, `tool_input`, `tool_result` |
-| `web_search` | Web search | `query`, `results[]` |
-| `todo_list` | Task planning | `items[]` with `task`, `status` |
-| `error` | Error item | `error_type`, `message`, `details` |
+| Item Type           | Purpose           | Key Fields in `item.updated`               |
+| ------------------- | ----------------- | ------------------------------------------ |
+| `agent_message`     | Assistant text    | `content`                                  |
+| `reasoning`         | Chain-of-thought  | `reasoning`, `summary`                     |
+| `command_execution` | Shell command     | `command_line`, `aggregated_output`        |
+| `file_change`       | File modification | `changes[]` with `path`, `before`, `after` |
+| `mcp_tool_call`     | MCP tool          | `tool_name`, `tool_input`, `tool_result`   |
+| `web_search`        | Web search        | `query`, `results[]`                       |
+| `todo_list`         | Task planning     | `items[]` with `task`, `status`            |
+| `error`             | Error item        | `error_type`, `message`, `details`         |
 
 #### Gemini CLI Events (9 types)
 
-| Event Type | Purpose | Fields | Notes |
-|------------|---------|--------|-------|
-| `init` | Session start | `session_id`, `model`, `timestamp` | First event, contains session ID for resume |
-| `message` | User/assistant message | `role`, `content`, `delta?`, `timestamp` | Supports streaming via delta flag |
-| `tool_use` | Tool invocation request | `tool_name`, `tool_id`, `parameters`, `timestamp` | Before tool executes |
-| `tool_result` | Tool execution result | `tool_id`, `status`, `output?`, `error?`, `timestamp` | After tool completes |
-| `content` | Text content (legacy) | `value` | Streaming text chunks |
-| `tool_call` | Tool invocation (legacy) | `name`, `args` | Atomic (no separate result) |
-| `result` | Session completion | `status`, `stats`, `timestamp`, `error?` | Final event |
-| `error` | Error event | `error.code`, `error.message` | May occur any time |
-| `retry` | Retry signal | `attempt`, `max_attempts`, `delay_ms` | On transient failure |
+| Event Type    | Purpose                  | Fields                                                | Notes                                       |
+| ------------- | ------------------------ | ----------------------------------------------------- | ------------------------------------------- |
+| `init`        | Session start            | `session_id`, `model`, `timestamp`                    | First event, contains session ID for resume |
+| `message`     | User/assistant message   | `role`, `content`, `delta?`, `timestamp`              | Supports streaming via delta flag           |
+| `tool_use`    | Tool invocation request  | `tool_name`, `tool_id`, `parameters`, `timestamp`     | Before tool executes                        |
+| `tool_result` | Tool execution result    | `tool_id`, `status`, `output?`, `error?`, `timestamp` | After tool completes                        |
+| `content`     | Text content (legacy)    | `value`                                               | Streaming text chunks                       |
+| `tool_call`   | Tool invocation (legacy) | `name`, `args`                                        | Atomic (no separate result)                 |
+| `result`      | Session completion       | `status`, `stats`, `timestamp`, `error?`              | Final event                                 |
+| `error`       | Error event              | `error.code`, `error.message`                         | May occur any time                          |
+| `retry`       | Retry signal             | `attempt`, `max_attempts`, `delay_ms`                 | On transient failure                        |
 
 ### 6.3 Comprehensive Event Mapping Matrix
 
 This matrix maps every event type across all three CLIs:
 
-| Semantic Concept | Claude Code | Codex CLI | Gemini CLI |
-|------------------|-------------|-----------|------------|
-| **Session Lifecycle** | | | |
-| Session start | `init` | `thread.started` | `init` |
-| Session end (success) | `result` (status: success) | (process exit 0) | `result` (status: success) |
-| Session end (error) | `result` (status: error) | `turn.failed` | `result` (status: error) |
-| Session end (cancelled) | `result` (status: cancelled) | (SIGTERM) | `result` (status: cancelled) |
-| **Turn Lifecycle** | | | |
-| Turn start | (implicit) | `turn.started` | (implicit) |
-| Turn end | (implicit) | `turn.completed` | (implicit in result) |
-| Turn failed | `error` | `turn.failed` | `error` |
-| **Content Events** | | | |
-| Assistant text (complete) | `message` (partial: false) | `item.completed` (agent_message) | `content` (final) |
-| Assistant text (streaming) | `message` (partial: true) | `item.updated` (agent_message) | `content` (incremental) |
-| User message | `message` (role: user) | - | - |
-| **Tool Lifecycle** | | | |
-| Tool invocation start | `tool_use` | `item.started` (command/mcp/file) | `tool_call` |
-| Tool progress/output | - | `item.updated` | - |
-| Tool completed (success) | `tool_result` (is_error: false) | `item.completed` (status: success) | (implicit in next content) |
-| Tool completed (error) | `tool_result` (is_error: true) | `item.completed` (status: failed) | (error in result) |
-| **Specific Tool Types** | | | |
-| Shell command | `tool_use` (name: Bash) | `item.*` (command_execution) | `tool_call` (name: run_shell) |
-| File read | `tool_use` (name: Read) | `item.*` (command_execution) | `tool_call` (name: read_file) |
-| File write/edit | `tool_use` (name: Edit/Write) | `item.*` (file_change) | `tool_call` (name: write_file) |
-| MCP tool | `tool_use` (name: mcp__*) | `item.*` (mcp_tool_call) | `tool_call` (MCP name) |
-| Web search | `tool_use` (name: WebSearch) | `item.*` (web_search) | `tool_call` (name: google_search) |
-| **Reasoning/Thinking** | | | |
-| Visible reasoning | - | `item.*` (reasoning) | - |
-| Internal thinking | (not exposed) | (summary in reasoning) | (not exposed) |
-| **Task Management** | | | |
-| Todo list | `tool_use` (name: TodoWrite) | `item.*` (todo_list) | - |
-| **System Events** | | | |
-| System init info | `system` (subtype: init) | - | - |
-| Context compaction | `system` (subtype: compact_boundary) | - | - |
-| Verbose/debug | `stream_event` (--verbose) | - | (--debug to stderr) |
-| **Error Handling** | | | |
-| Session error | `error` | `error` | `error` |
-| Tool error | `tool_result` (is_error: true) | `item.*` (error item_type) | `result` (status: error) |
-| Retry signal | - | - | `retry` |
-| **Token/Usage Tracking** | | | |
-| Per-turn usage | - | `turn.completed.usage` | - |
-| Final usage | `result.duration_ms` | `turn.completed.usage` | `result.stats` |
-| **Permission Events** | | | |
-| Permission request | (via MCP tool call) | - | - |
-| Permission response | (via MCP tool result) | - | - |
+| Semantic Concept           | Claude Code                          | Codex CLI                          | Gemini CLI                        |
+| -------------------------- | ------------------------------------ | ---------------------------------- | --------------------------------- |
+| **Session Lifecycle**      |                                      |                                    |                                   |
+| Session start              | `init`                               | `thread.started`                   | `init`                            |
+| Session end (success)      | `result` (status: success)           | (process exit 0)                   | `result` (status: success)        |
+| Session end (error)        | `result` (status: error)             | `turn.failed`                      | `result` (status: error)          |
+| Session end (cancelled)    | `result` (status: cancelled)         | (SIGTERM)                          | `result` (status: cancelled)      |
+| **Turn Lifecycle**         |                                      |                                    |                                   |
+| Turn start                 | (implicit)                           | `turn.started`                     | (implicit)                        |
+| Turn end                   | (implicit)                           | `turn.completed`                   | (implicit in result)              |
+| Turn failed                | `error`                              | `turn.failed`                      | `error`                           |
+| **Content Events**         |                                      |                                    |                                   |
+| Assistant text (complete)  | `message` (partial: false)           | `item.completed` (agent_message)   | `content` (final)                 |
+| Assistant text (streaming) | `message` (partial: true)            | `item.updated` (agent_message)     | `content` (incremental)           |
+| User message               | `message` (role: user)               | -                                  | -                                 |
+| **Tool Lifecycle**         |                                      |                                    |                                   |
+| Tool invocation start      | `tool_use`                           | `item.started` (command/mcp/file)  | `tool_call`                       |
+| Tool progress/output       | -                                    | `item.updated`                     | -                                 |
+| Tool completed (success)   | `tool_result` (is_error: false)      | `item.completed` (status: success) | (implicit in next content)        |
+| Tool completed (error)     | `tool_result` (is_error: true)       | `item.completed` (status: failed)  | (error in result)                 |
+| **Specific Tool Types**    |                                      |                                    |                                   |
+| Shell command              | `tool_use` (name: Bash)              | `item.*` (command_execution)       | `tool_call` (name: run_shell)     |
+| File read                  | `tool_use` (name: Read)              | `item.*` (command_execution)       | `tool_call` (name: read_file)     |
+| File write/edit            | `tool_use` (name: Edit/Write)        | `item.*` (file_change)             | `tool_call` (name: write_file)    |
+| MCP tool                   | `tool_use` (name: mcp__*)            | `item.*` (mcp_tool_call)           | `tool_call` (MCP name)            |
+| Web search                 | `tool_use` (name: WebSearch)         | `item.*` (web_search)              | `tool_call` (name: google_search) |
+| **Reasoning/Thinking**     |                                      |                                    |                                   |
+| Visible reasoning          | -                                    | `item.*` (reasoning)               | -                                 |
+| Internal thinking          | (not exposed)                        | (summary in reasoning)             | (not exposed)                     |
+| **Task Management**        |                                      |                                    |                                   |
+| Todo list                  | `tool_use` (name: TodoWrite)         | `item.*` (todo_list)               | -                                 |
+| **System Events**          |                                      |                                    |                                   |
+| System init info           | `system` (subtype: init)             | -                                  | -                                 |
+| Context compaction         | `system` (subtype: compact_boundary) | -                                  | -                                 |
+| Verbose/debug              | `stream_event` (--verbose)           | -                                  | (--debug to stderr)               |
+| **Error Handling**         |                                      |                                    |                                   |
+| Session error              | `error`                              | `error`                            | `error`                           |
+| Tool error                 | `tool_result` (is_error: true)       | `item.*` (error item_type)         | `result` (status: error)          |
+| Retry signal               | -                                    | -                                  | `retry`                           |
+| **Token/Usage Tracking**   |                                      |                                    |                                   |
+| Per-turn usage             | -                                    | `turn.completed.usage`             | -                                 |
+| Final usage                | `result.duration_ms`                 | `turn.completed.usage`             | `result.stats`                    |
+| **Permission Events**      |                                      |                                    |                                   |
+| Permission request         | (via MCP tool call)                  | -                                  | -                                 |
+| Permission response        | (via MCP tool result)                | -                                  | -                                 |
 
 ### 6.4 Permission Mode Mapping
 
-| Behavior | Claude Code | Codex CLI | Gemini CLI |
-|----------|-------------|-----------|------------|
-| **Ask for all** | Default | `untrusted` / `-a` | `default` |
-| **Ask dangerous only** | (via hooks) | `on-request` | - |
-| **Auto file edits** | `--allowedTools "Edit,Write"` | - | `auto_edit` |
-| **Auto all** | `--dangerously-skip-permissions` | `--full-auto` | `--yolo` |
-| **Sandbox** | - | `workspace-write` | `--sandbox` |
-| **MCP Permission Delegation** | `--permission-prompt-tool` | - | - |
+| Behavior                      | Claude Code                      | Codex CLI          | Gemini CLI  |
+| ----------------------------- | -------------------------------- | ------------------ | ----------- |
+| **Ask for all**               | Default                          | `untrusted` / `-a` | `default`   |
+| **Ask dangerous only**        | (via hooks)                      | `on-request`       | -           |
+| **Auto file edits**           | `--allowedTools "Edit,Write"`    | -                  | `auto_edit` |
+| **Auto all**                  | `--dangerously-skip-permissions` | `--full-auto`      | `--yolo`    |
+| **Sandbox**                   | -                                | `workspace-write`  | `--sandbox` |
+| **MCP Permission Delegation** | `--permission-prompt-tool`       | -                  | -           |
 
 ### 6.5 Feature Comparison
 
-| Feature | Claude Code | Codex CLI | Gemini CLI |
-|---------|-------------|-----------|------------|
-| **Streaming granularity** | Per-message | Per-item-update | Per-content-chunk |
-| **Tool lifecycle events** | 2 (use/result) | 3 (start/update/complete) | 1 (atomic call) |
-| **Reasoning visibility** | No | Yes (`reasoning` item) | No |
-| **Token tracking** | No | Yes (turn.completed.usage) | Yes (result.stats) |
-| **Structured output** | `--json-schema` | `--output-schema` | No |
-| **Partial streaming** | `--include-partial-messages` | Built-in (item.updated) | Built-in |
-| **MCP integration** | Yes | Yes | Yes |
-| **Git checkpointing** | No | No | Yes |
-| **Permission delegation** | MCP tool | Config only | Config only |
+| Feature                   | Claude Code                  | Codex CLI                  | Gemini CLI         |
+| ------------------------- | ---------------------------- | -------------------------- | ------------------ |
+| **Streaming granularity** | Per-message                  | Per-item-update            | Per-content-chunk  |
+| **Tool lifecycle events** | 2 (use/result)               | 3 (start/update/complete)  | 1 (atomic call)    |
+| **Reasoning visibility**  | No                           | Yes (`reasoning` item)     | No                 |
+| **Token tracking**        | No                           | Yes (turn.completed.usage) | Yes (result.stats) |
+| **Structured output**     | `--json-schema`              | `--output-schema`          | No                 |
+| **Partial streaming**     | `--include-partial-messages` | Built-in (item.updated)    | Built-in           |
+| **MCP integration**       | Yes                          | Yes                        | Yes                |
+| **Git checkpointing**     | No                           | No                         | Yes                |
+| **Permission delegation** | MCP tool                     | Config only                | Config only        |
 
 ### 6.6 Event Flow Patterns
 
@@ -1348,7 +1373,10 @@ turn.completed
 init → message* → (tool_use → tool_result)* → message* → result
 ```
 
-**Note:** Gemini CLI's event flow pattern is now nearly identical to Claude Code's. The key difference is the process lifecycle: Claude Code maintains a long-lived bidirectional process, while Gemini uses process-per-turn with session persistence (like Codex).
+**Note:** Gemini CLI's event flow pattern is now nearly identical to Claude
+Code's. The key difference is the process lifecycle: Claude Code maintains a
+long-lived bidirectional process, while Gemini uses process-per-turn with
+session persistence (like Codex).
 
 ---
 
@@ -1625,67 +1653,67 @@ class GeminiAdapter implements ProtocolAdapter {
 ### 7.5 Event Translation Matrix
 
 #### From Claude Code
-| Native Event | Unified Event(s) |
-|--------------|------------------|
-| `type: "init"` | `SessionStartedEvent` |
-| `type: "message"` | `TextChunkEvent` |
-| `type: "message"` (partial: true) | `TextChunkEvent` (isPartial: true) |
-| `type: "tool_use"` | `ToolStartedEvent` |
-| `type: "tool_result"` | `ToolCompletedEvent` |
-| `type: "result"` (success) | `SessionEndedEvent(completed)` |
-| `type: "result"` (error) | `SessionEndedEvent(failed)` |
-| `type: "error"` | `SessionEndedEvent(failed)` |
-| `type: "system"` (subtype: init) | `SystemEvent` (informational, usually ignored) |
-| `type: "system"` (subtype: compact_boundary) | `SystemEvent` (context management) |
-| `type: "stream_event"` | `RawDeltaEvent` (verbose mode only) |
+| Native Event                                 | Unified Event(s)                               |
+| -------------------------------------------- | ---------------------------------------------- |
+| `type: "init"`                               | `SessionStartedEvent`                          |
+| `type: "message"`                            | `TextChunkEvent`                               |
+| `type: "message"` (partial: true)            | `TextChunkEvent` (isPartial: true)             |
+| `type: "tool_use"`                           | `ToolStartedEvent`                             |
+| `type: "tool_result"`                        | `ToolCompletedEvent`                           |
+| `type: "result"` (success)                   | `SessionEndedEvent(completed)`                 |
+| `type: "result"` (error)                     | `SessionEndedEvent(failed)`                    |
+| `type: "error"`                              | `SessionEndedEvent(failed)`                    |
+| `type: "system"` (subtype: init)             | `SystemEvent` (informational, usually ignored) |
+| `type: "system"` (subtype: compact_boundary) | `SystemEvent` (context management)             |
+| `type: "stream_event"`                       | `RawDeltaEvent` (verbose mode only)            |
 
 #### From Codex CLI
-| Native Event | Unified Event(s) |
-|--------------|------------------|
-| `thread.started` | `SessionStartedEvent` |
-| `turn.started` | `TurnStartedEvent` (optional) |
-| `item.started` (agent_message) | `TextChunkEvent` (start) |
-| `item.updated` (agent_message) | `TextChunkEvent` (streaming) |
-| `item.completed` (agent_message) | `TextChunkEvent` (final) |
-| `item.started` (reasoning) | `ReasoningEvent` (start) |
-| `item.updated` (reasoning) | `ReasoningEvent` (streaming) |
-| `item.completed` (reasoning) | `ReasoningEvent` (final) |
-| `item.started` (command_execution) | `ToolStartedEvent` (shell) |
-| `item.updated` (command_execution) | `ToolProgressEvent` (output streaming) |
-| `item.completed` (command_execution) | `ToolCompletedEvent` (shell) |
-| `item.started` (file_change) | `FileChangedEvent` (start) |
-| `item.updated` (file_change) | `FileChangedEvent` (diff details) |
-| `item.completed` (file_change) | `FileChangedEvent` (final) |
-| `item.started` (mcp_tool_call) | `ToolStartedEvent` (MCP) |
-| `item.updated` (mcp_tool_call) | `ToolProgressEvent` (MCP) |
-| `item.completed` (mcp_tool_call) | `ToolCompletedEvent` (MCP) |
-| `item.started` (web_search) | `ToolStartedEvent` (search) |
-| `item.updated` (web_search) | `ToolProgressEvent` (results) |
-| `item.completed` (web_search) | `ToolCompletedEvent` (search) |
-| `item.*` (todo_list) | `TodoListEvent` |
-| `item.*` (error) | `ErrorEvent` |
-| `turn.completed` | `TurnCompletedEvent` |
-| `turn.failed` | `SessionEndedEvent(failed)` |
-| `error` | `SessionEndedEvent(failed)` |
-| (process exit 0) | `SessionEndedEvent(completed)` |
+| Native Event                         | Unified Event(s)                       |
+| ------------------------------------ | -------------------------------------- |
+| `thread.started`                     | `SessionStartedEvent`                  |
+| `turn.started`                       | `TurnStartedEvent` (optional)          |
+| `item.started` (agent_message)       | `TextChunkEvent` (start)               |
+| `item.updated` (agent_message)       | `TextChunkEvent` (streaming)           |
+| `item.completed` (agent_message)     | `TextChunkEvent` (final)               |
+| `item.started` (reasoning)           | `ReasoningEvent` (start)               |
+| `item.updated` (reasoning)           | `ReasoningEvent` (streaming)           |
+| `item.completed` (reasoning)         | `ReasoningEvent` (final)               |
+| `item.started` (command_execution)   | `ToolStartedEvent` (shell)             |
+| `item.updated` (command_execution)   | `ToolProgressEvent` (output streaming) |
+| `item.completed` (command_execution) | `ToolCompletedEvent` (shell)           |
+| `item.started` (file_change)         | `FileChangedEvent` (start)             |
+| `item.updated` (file_change)         | `FileChangedEvent` (diff details)      |
+| `item.completed` (file_change)       | `FileChangedEvent` (final)             |
+| `item.started` (mcp_tool_call)       | `ToolStartedEvent` (MCP)               |
+| `item.updated` (mcp_tool_call)       | `ToolProgressEvent` (MCP)              |
+| `item.completed` (mcp_tool_call)     | `ToolCompletedEvent` (MCP)             |
+| `item.started` (web_search)          | `ToolStartedEvent` (search)            |
+| `item.updated` (web_search)          | `ToolProgressEvent` (results)          |
+| `item.completed` (web_search)        | `ToolCompletedEvent` (search)          |
+| `item.*` (todo_list)                 | `TodoListEvent`                        |
+| `item.*` (error)                     | `ErrorEvent`                           |
+| `turn.completed`                     | `TurnCompletedEvent`                   |
+| `turn.failed`                        | `SessionEndedEvent(failed)`            |
+| `error`                              | `SessionEndedEvent(failed)`            |
+| (process exit 0)                     | `SessionEndedEvent(completed)`         |
 
 #### From Gemini CLI
-| Native Event | Unified Event(s) |
-|--------------|------------------|
-| `type: "init"` | `SessionStartedEvent` |
-| `type: "message"` (role: user) | (informational, not translated) |
-| `type: "message"` (role: assistant) | `TextChunkEvent` |
-| `type: "message"` (delta: true) | `TextChunkEvent` (isPartial: true) |
-| `type: "tool_use"` | `ToolStartedEvent` |
-| `type: "tool_result"` (success) | `ToolCompletedEvent` |
-| `type: "tool_result"` (error) | `ToolCompletedEvent` (success: false) |
-| `type: "content"` (legacy) | `TextChunkEvent` |
-| `type: "tool_call"` (legacy) | `ToolStartedEvent` + `ToolCompletedEvent` (atomic) |
-| `type: "result"` (success) | `TurnCompletedEvent` + `SessionEndedEvent(completed)` |
-| `type: "result"` (error) | `SessionEndedEvent(failed)` |
-| `type: "result"` (cancelled) | `SessionEndedEvent(cancelled)` |
-| `type: "error"` | `SessionEndedEvent(failed)` |
-| `type: "retry"` | `RetryEvent` (transient failure handling) |
+| Native Event                        | Unified Event(s)                                      |
+| ----------------------------------- | ----------------------------------------------------- |
+| `type: "init"`                      | `SessionStartedEvent`                                 |
+| `type: "message"` (role: user)      | (informational, not translated)                       |
+| `type: "message"` (role: assistant) | `TextChunkEvent`                                      |
+| `type: "message"` (delta: true)     | `TextChunkEvent` (isPartial: true)                    |
+| `type: "tool_use"`                  | `ToolStartedEvent`                                    |
+| `type: "tool_result"` (success)     | `ToolCompletedEvent`                                  |
+| `type: "tool_result"` (error)       | `ToolCompletedEvent` (success: false)                 |
+| `type: "content"` (legacy)          | `TextChunkEvent`                                      |
+| `type: "tool_call"` (legacy)        | `ToolStartedEvent` + `ToolCompletedEvent` (atomic)    |
+| `type: "result"` (success)          | `TurnCompletedEvent` + `SessionEndedEvent(completed)` |
+| `type: "result"` (error)            | `SessionEndedEvent(failed)`                           |
+| `type: "result"` (cancelled)        | `SessionEndedEvent(cancelled)`                        |
+| `type: "error"`                     | `SessionEndedEvent(failed)`                           |
+| `type: "retry"`                     | `RetryEvent` (transient failure handling)             |
 
 ---
 
@@ -2388,11 +2416,11 @@ npx @google/gemini-cli
 
 ## Appendix B: Environment Variables
 
-| Variable | Claude | Codex | Gemini |
-|----------|--------|-------|--------|
+| Variable    | Claude              | Codex            | Gemini                              |
+| ----------- | ------------------- | ---------------- | ----------------------------------- |
 | **API Key** | `ANTHROPIC_API_KEY` | `OPENAI_API_KEY` | `GEMINI_API_KEY` / `GOOGLE_API_KEY` |
-| **Model** | `CLAUDE_MODEL` | - | `GEMINI_MODEL` |
-| **Debug** | `CLAUDE_DEBUG=1` | - | `-d` flag |
+| **Model**   | `CLAUDE_MODEL`      | -                | `GEMINI_MODEL`                      |
+| **Debug**   | `CLAUDE_DEBUG=1`    | -                | `-d` flag                           |
 
 ## Appendix C: References
 
@@ -2400,7 +2428,8 @@ npx @google/gemini-cli
 - [Codex CLI Documentation](https://github.com/openai/codex/tree/main/docs)
 - [Gemini CLI Documentation](https://geminicli.com/docs/)
 - [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview)
-- [Stream-JSON Chaining](https://github.com/ruvnet/claude-flow/wiki/Stream-Chaining)
+- [Stream-JSON
+  Chaining](https://github.com/ruvnet/claude-flow/wiki/Stream-Chaining)
 
 ---
 
