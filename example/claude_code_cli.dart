@@ -3,9 +3,9 @@
 /// This example shows:
 /// - Creating a session with configuration options
 /// - Streaming events from the session
-/// - Multi-turn conversations via resumeSession
-/// - Listing existing sessions
-/// - Cancelling a session
+/// - Capturing session ID for later resumption
+/// - Resuming a session with a stored ID
+/// - Listing sessions and verifying the captured ID is present
 ///
 /// Prerequisites:
 /// - Claude Code CLI must be installed and authenticated
@@ -22,23 +22,26 @@ Future<void> main() async {
   final workDir = p.join(Directory.current.path, 'tmp');
   Directory(workDir).createSync(recursive: true);
 
-  final client = ClaudeClient(cwd: workDir);
+  final client = ClaudeCodeCliAdapter(cwd: workDir);
 
   // Example 1: Simple single-turn session
   print('=== Example 1: Simple Session ===');
   await simpleSingleTurn(client);
 
-  // Example 2: Multi-turn conversation
-  print('\n=== Example 2: Multi-Turn Conversation ===');
-  await multiTurnConversation(client);
+  // Example 2: Capture session ID and resume later
+  print('\n=== Example 2: Capture and Resume Session ===');
+  final sessionId = await createAndCaptureSession(client);
+  print('Stored session ID: $sessionId');
+  print('(This ID could be persisted to disk/database for later use)\n');
+  await resumeStoredSession(client, sessionId);
 
-  // Example 3: List existing sessions
-  print('\n=== Example 3: List Sessions ===');
-  await listExistingSessions(client);
+  // Example 3: List sessions and verify our session is present
+  print('\n=== Example 3: List and Verify Sessions ===');
+  await listAndVerifySession(client, sessionId);
 }
 
 /// Simple single-turn session with basic configuration
-Future<void> simpleSingleTurn(ClaudeClient client) async {
+Future<void> simpleSingleTurn(ClaudeCodeCliAdapter client) async {
   final config = ClaudeSessionConfig(
     // Skip permission prompts for automation
     permissionMode: ClaudePermissionMode.bypassPermissions,
@@ -77,24 +80,24 @@ Future<void> simpleSingleTurn(ClaudeClient client) async {
   }
 }
 
-/// Multi-turn conversation using resumeSession
-Future<void> multiTurnConversation(ClaudeClient client) async {
+/// Create a session and return the session ID for later resumption.
+/// In a real app, you would persist this ID to disk or database.
+Future<String> createAndCaptureSession(ClaudeCodeCliAdapter client) async {
   final config = ClaudeSessionConfig(
     permissionMode: ClaudePermissionMode.bypassPermissions,
     maxTurns: 1,
   );
 
-  // First turn: Establish context
-  print('Turn 1: Establishing context...');
-  final session1 = await client.createSession(
+  print('Creating session and establishing context...');
+  final session = await client.createSession(
     'Remember this code: XYZ123. Just say "OK, I will remember XYZ123".',
     config,
   );
 
-  final sessionId = session1.sessionId;
-  print('Session ID: $sessionId');
+  // Capture the session ID immediately - this is what you'd store
+  final sessionId = session.sessionId;
 
-  await for (final event in session1.events) {
+  await for (final event in session.events) {
     if (event is ClaudeAssistantEvent) {
       for (final block in event.content) {
         if (block is ClaudeTextBlock) {
@@ -105,15 +108,29 @@ Future<void> multiTurnConversation(ClaudeClient client) async {
     if (event is ClaudeResultEvent) break;
   }
 
-  // Second turn: Recall context
-  print('\nTurn 2: Recalling context...');
-  final session2 = await client.resumeSession(
+  // Return the session ID so it can be stored and used later
+  return sessionId;
+}
+
+/// Resume a session using a previously stored session ID.
+/// This could be called in a completely separate program execution.
+Future<void> resumeStoredSession(
+  ClaudeCodeCliAdapter client,
+  String sessionId,
+) async {
+  final config = ClaudeSessionConfig(
+    permissionMode: ClaudePermissionMode.bypassPermissions,
+    maxTurns: 1,
+  );
+
+  print('Resuming session with stored ID: $sessionId');
+  final session = await client.resumeSession(
     sessionId,
     'What code did I ask you to remember?',
     config,
   );
 
-  await for (final event in session2.events) {
+  await for (final event in session.events) {
     if (event is ClaudeAssistantEvent) {
       for (final block in event.content) {
         if (block is ClaudeTextBlock) {
@@ -122,14 +139,18 @@ Future<void> multiTurnConversation(ClaudeClient client) async {
       }
     }
     if (event is ClaudeResultEvent) {
-      print('Multi-turn conversation completed.');
+      print('Successfully resumed and completed session.');
       break;
     }
   }
 }
 
-/// List all existing sessions in the working directory
-Future<void> listExistingSessions(ClaudeClient client) async {
+/// List all sessions and verify the captured session ID is present.
+/// This demonstrates that persisted session IDs can be discovered via listSessions.
+Future<void> listAndVerifySession(
+  ClaudeCodeCliAdapter client,
+  String expectedSessionId,
+) async {
   final sessions = await client.listSessions();
 
   if (sessions.isEmpty) {
@@ -143,10 +164,18 @@ Future<void> listExistingSessions(ClaudeClient client) async {
     print('    Created: ${info.timestamp}');
     print('    Updated: ${info.lastUpdated}');
   }
+
+  // Verify the session we created earlier is in the list
+  final found = sessions.any((s) => s.sessionId == expectedSessionId);
+  if (found) {
+    print('\nVerified: Session $expectedSessionId found in list.');
+  } else {
+    print('\nWarning: Session $expectedSessionId not found in list.');
+  }
 }
 
 /// Example of session cancellation (not run by default)
-Future<void> cancelSessionExample(ClaudeClient client) async {
+Future<void> cancelSessionExample(ClaudeCodeCliAdapter client) async {
   final config = ClaudeSessionConfig(
     permissionMode: ClaudePermissionMode.bypassPermissions,
   );

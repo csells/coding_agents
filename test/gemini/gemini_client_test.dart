@@ -1,17 +1,17 @@
-import 'package:test/test.dart';
-import 'package:coding_agents/src/cli_adapters/gemini/gemini_client.dart';
+import 'package:coding_agents/src/cli_adapters/gemini/gemini_cli_adapter.dart';
 import 'package:coding_agents/src/cli_adapters/gemini/gemini_events.dart';
 import 'package:coding_agents/src/cli_adapters/gemini/gemini_types.dart';
+import 'package:test/test.dart';
 
 void main() {
   group('GeminiClient', () {
     test('constructs with cwd', () {
-      final client = GeminiClient(cwd: '/path/to/project');
+      final client = GeminiCliAdapter(cwd: '/path/to/project');
       expect(client.cwd, '/path/to/project');
     });
 
     test('buildInitialArgs generates correct arguments for default config', () {
-      final client = GeminiClient(cwd: '/test');
+      final client = GeminiCliAdapter(cwd: '/test');
       final config = GeminiSessionConfig();
 
       final args = client.buildInitialArgs('test prompt', config);
@@ -23,10 +23,8 @@ void main() {
     });
 
     test('buildInitialArgs includes yolo flag', () {
-      final client = GeminiClient(cwd: '/test');
-      final config = GeminiSessionConfig(
-        approvalMode: GeminiApprovalMode.yolo,
-      );
+      final client = GeminiCliAdapter(cwd: '/test');
+      final config = GeminiSessionConfig(approvalMode: GeminiApprovalMode.yolo);
 
       final args = client.buildInitialArgs('test prompt', config);
 
@@ -34,7 +32,7 @@ void main() {
     });
 
     test('buildInitialArgs includes auto-edit flag', () {
-      final client = GeminiClient(cwd: '/test');
+      final client = GeminiCliAdapter(cwd: '/test');
       final config = GeminiSessionConfig(
         approvalMode: GeminiApprovalMode.autoEdit,
       );
@@ -45,7 +43,7 @@ void main() {
     });
 
     test('buildInitialArgs includes sandbox flag', () {
-      final client = GeminiClient(cwd: '/test');
+      final client = GeminiCliAdapter(cwd: '/test');
       final config = GeminiSessionConfig(sandbox: true);
 
       final args = client.buildInitialArgs('test prompt', config);
@@ -54,7 +52,7 @@ void main() {
     });
 
     test('buildInitialArgs includes sandbox image', () {
-      final client = GeminiClient(cwd: '/test');
+      final client = GeminiCliAdapter(cwd: '/test');
       final config = GeminiSessionConfig(
         sandbox: true,
         sandboxImage: 'my-image:latest',
@@ -68,10 +66,8 @@ void main() {
     });
 
     test('buildInitialArgs includes model when specified', () {
-      final client = GeminiClient(cwd: '/test');
-      final config = GeminiSessionConfig(
-        model: 'gemini-2.0-flash-exp',
-      );
+      final client = GeminiCliAdapter(cwd: '/test');
+      final config = GeminiSessionConfig(model: 'gemini-2.0-flash-exp');
 
       final args = client.buildInitialArgs('test prompt', config);
 
@@ -80,7 +76,7 @@ void main() {
     });
 
     test('buildInitialArgs includes debug flag when enabled', () {
-      final client = GeminiClient(cwd: '/test');
+      final client = GeminiCliAdapter(cwd: '/test');
       final config = GeminiSessionConfig(debug: true);
 
       final args = client.buildInitialArgs('test prompt', config);
@@ -89,7 +85,7 @@ void main() {
     });
 
     test('buildResumeArgs generates correct arguments', () {
-      final client = GeminiClient(cwd: '/test');
+      final client = GeminiCliAdapter(cwd: '/test');
       final config = GeminiSessionConfig();
 
       final args = client.buildResumeArgs('sess-123-abc', 'continue', config);
@@ -103,10 +99,8 @@ void main() {
     });
 
     test('buildResumeArgs includes yolo flag for resumed session', () {
-      final client = GeminiClient(cwd: '/test');
-      final config = GeminiSessionConfig(
-        approvalMode: GeminiApprovalMode.yolo,
-      );
+      final client = GeminiCliAdapter(cwd: '/test');
+      final config = GeminiSessionConfig(approvalMode: GeminiApprovalMode.yolo);
 
       final args = client.buildResumeArgs('sess-456-def', 'continue', config);
 
@@ -116,7 +110,7 @@ void main() {
     });
 
     test('buildResumeArgs includes sandbox for resumed session', () {
-      final client = GeminiClient(cwd: '/test');
+      final client = GeminiCliAdapter(cwd: '/test');
       final config = GeminiSessionConfig(
         sandbox: true,
         sandboxImage: 'image:v1',
@@ -134,8 +128,9 @@ void main() {
 
   group('GeminiClient event parsing', () {
     test('parseJsonLine parses valid JSONL', () {
-      final client = GeminiClient(cwd: '/test');
-      final line = '{"type":"init","session_id":"sess_123","model":"gemini-flash"}';
+      final client = GeminiCliAdapter(cwd: '/test');
+      final line =
+          '{"type":"init","session_id":"sess_123","model":"gemini-flash"}';
 
       final event = client.parseJsonLine(line, 'sess_123', 1);
 
@@ -143,21 +138,21 @@ void main() {
     });
 
     test('parseJsonLine returns null for empty line', () {
-      final client = GeminiClient(cwd: '/test');
+      final client = GeminiCliAdapter(cwd: '/test');
 
       expect(client.parseJsonLine('', '', 1), isNull);
       expect(client.parseJsonLine('   ', '', 1), isNull);
     });
 
     test('parseJsonLine returns null for non-JSON line', () {
-      final client = GeminiClient(cwd: '/test');
+      final client = GeminiCliAdapter(cwd: '/test');
 
       expect(client.parseJsonLine('not json', '', 1), isNull);
       expect(client.parseJsonLine('# comment', '', 1), isNull);
     });
 
     test('parseJsonLine throws on malformed JSON', () {
-      final client = GeminiClient(cwd: '/test');
+      final client = GeminiCliAdapter(cwd: '/test');
 
       expect(
         () => client.parseJsonLine('{malformed', '', 1),

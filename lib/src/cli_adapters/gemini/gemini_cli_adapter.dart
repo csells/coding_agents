@@ -17,12 +17,12 @@ class GeminiProcessException implements Exception {
 }
 
 /// Client for interacting with Gemini CLI
-class GeminiClient {
+class GeminiCliAdapter {
   final String cwd;
 
   int _turnCounter = 0;
 
-  GeminiClient({required this.cwd});
+  GeminiCliAdapter({required this.cwd});
 
   /// Create a new Gemini session with the given prompt
   ///
@@ -48,24 +48,24 @@ class GeminiClient {
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
-      final event = parseJsonLine(line, sessionId, turnId);
-      if (event == null) return;
+          final event = parseJsonLine(line, sessionId, turnId);
+          if (event == null) return;
 
-      // Capture session ID from init event
-      if (event is GeminiInitEvent) {
-        sessionId = event.sessionId;
-        if (!sessionIdCompleter.isCompleted) {
-          sessionIdCompleter.complete(event.sessionId);
-        }
-      }
+          // Capture session ID from init event
+          if (event is GeminiInitEvent) {
+            sessionId = event.sessionId;
+            if (!sessionIdCompleter.isCompleted) {
+              sessionIdCompleter.complete(event.sessionId);
+            }
+          }
 
-      // Buffer events until first subscription, then emit directly
-      if (isSubscribed) {
-        eventController.add(event);
-      } else {
-        bufferedEvents.add(event);
-      }
-    });
+          // Buffer events until first subscription, then emit directly
+          if (isSubscribed) {
+            eventController.add(event);
+          } else {
+            bufferedEvents.add(event);
+          }
+        });
 
     // When first listener subscribes, replay buffered events
     eventController.onListen = () {
@@ -128,16 +128,16 @@ class GeminiClient {
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
-      final event = parseJsonLine(line, sessionId, turnId);
-      if (event == null) return;
+          final event = parseJsonLine(line, sessionId, turnId);
+          if (event == null) return;
 
-      // Buffer events until first subscription, then emit directly
-      if (isSubscribed) {
-        eventController.add(event);
-      } else {
-        bufferedEvents.add(event);
-      }
-    });
+          // Buffer events until first subscription, then emit directly
+          if (isSubscribed) {
+            eventController.add(event);
+          } else {
+            bufferedEvents.add(event);
+          }
+        });
 
     // When first listener subscribes, replay buffered events
     eventController.onListen = () {
@@ -176,11 +176,7 @@ class GeminiClient {
   /// Builds command-line arguments for starting a new Gemini session
   List<String> buildInitialArgs(String prompt, GeminiSessionConfig config) {
     // Gemini CLI uses positional prompt argument, not -p
-    final args = <String>[
-      prompt,
-      '-o',
-      'stream-json',
-    ];
+    final args = <String>[prompt, '-o', 'stream-json'];
 
     // Approval mode
     switch (config.approvalMode) {
@@ -223,14 +219,7 @@ class GeminiClient {
     GeminiSessionConfig config,
   ) {
     // Gemini resume uses -r with actual session UUID and -p for the prompt
-    final args = <String>[
-      '-p',
-      prompt,
-      '-o',
-      'stream-json',
-      '-r',
-      sessionId,
-    ];
+    final args = <String>['-p', prompt, '-o', 'stream-json', '-r', sessionId];
 
     // Approval mode
     switch (config.approvalMode) {

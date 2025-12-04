@@ -1,6 +1,6 @@
 import 'package:test/test.dart';
-import 'package:coding_agents/src/cli_adapters/claude/claude_events.dart';
-import 'package:coding_agents/src/cli_adapters/claude/claude_types.dart';
+import 'package:coding_agents/src/cli_adapters/claude_code/claude_events.dart';
+import 'package:coding_agents/src/cli_adapters/claude_code/claude_types.dart';
 
 void main() {
   group('ClaudeEvent.fromJson', () {

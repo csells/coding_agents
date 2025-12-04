@@ -18,13 +18,13 @@ class ClaudeProcessException implements Exception {
 }
 
 /// Client for interacting with Claude Code CLI
-class ClaudeClient {
+class ClaudeCodeCliAdapter {
   /// Working directory for the Claude process
   final String cwd;
 
   int _turnCounter = 0;
 
-  ClaudeClient({required this.cwd});
+  ClaudeCodeCliAdapter({required this.cwd});
 
   /// Create a new Claude session with the given prompt
   ///
@@ -101,23 +101,23 @@ class ClaudeClient {
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
-      final event = parseJsonLine(line, turnId);
-      if (event == null) return;
+          final event = parseJsonLine(line, turnId);
+          if (event == null) return;
 
-      // Capture session ID from init or system events
-      if (event is ClaudeSystemEvent &&
-          event.subtype == 'init' &&
-          !sessionIdCompleter.isCompleted) {
-        sessionIdCompleter.complete(event.sessionId);
-      }
+          // Capture session ID from init or system events
+          if (event is ClaudeSystemEvent &&
+              event.subtype == 'init' &&
+              !sessionIdCompleter.isCompleted) {
+            sessionIdCompleter.complete(event.sessionId);
+          }
 
-      // Buffer events until first subscription, then emit directly
-      if (isSubscribed) {
-        eventController.add(event);
-      } else {
-        bufferedEvents.add(event);
-      }
-    });
+          // Buffer events until first subscription, then emit directly
+          if (isSubscribed) {
+            eventController.add(event);
+          } else {
+            bufferedEvents.add(event);
+          }
+        });
 
     // When first listener subscribes, replay buffered events
     eventController.onListen = () {
@@ -161,12 +161,7 @@ class ClaudeClient {
     String prompt,
     String? sessionId,
   ) {
-    final args = <String>[
-      '-p',
-      prompt,
-      '--output-format',
-      'stream-json',
-    ];
+    final args = <String>['-p', prompt, '--output-format', 'stream-json'];
 
     // Resume session if sessionId provided
     if (sessionId != null) {

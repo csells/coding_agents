@@ -3,7 +3,8 @@
 /// This example shows:
 /// - Creating a session with sandbox mode
 /// - Streaming events (init, message, tool_use, result)
-/// - Multi-turn conversations via resumeSession
+/// - Capturing session ID for later resumption
+/// - Resuming a session with a stored session ID
 /// - Configuration options (model, approval mode, sandbox)
 ///
 /// Prerequisites:
@@ -21,15 +22,18 @@ Future<void> main() async {
   final workDir = p.join(Directory.current.path, 'tmp');
   Directory(workDir).createSync(recursive: true);
 
-  final client = GeminiClient(cwd: workDir);
+  final client = GeminiCliAdapter(cwd: workDir);
 
   // Example 1: Simple single-turn session with sandbox
   print('=== Example 1: Simple Session (Sandbox Mode) ===');
   await simpleSingleTurn(client);
 
-  // Example 2: Multi-turn conversation
-  print('\n=== Example 2: Multi-Turn Conversation ===');
-  await multiTurnConversation(client);
+  // Example 2: Capture session ID and resume later
+  print('\n=== Example 2: Capture and Resume Session ===');
+  final sessionId = await createAndCaptureSession(client);
+  print('Stored session ID: $sessionId');
+  print('(This ID could be persisted to disk/database for later use)\n');
+  await resumeStoredSession(client, sessionId);
 
   // Example 3: Custom configuration
   print('\n=== Example 3: Custom Configuration ===');
@@ -37,7 +41,7 @@ Future<void> main() async {
 }
 
 /// Simple single-turn session with sandbox mode
-Future<void> simpleSingleTurn(GeminiClient client) async {
+Future<void> simpleSingleTurn(GeminiCliAdapter client) async {
   final config = GeminiSessionConfig(
     // yolo skips all approval prompts
     approvalMode: GeminiApprovalMode.yolo,
@@ -82,51 +86,66 @@ Future<void> simpleSingleTurn(GeminiClient client) async {
   }
 }
 
-/// Multi-turn conversation using resumeSession
-Future<void> multiTurnConversation(GeminiClient client) async {
+/// Create a session and return the session ID for later resumption.
+/// In a real app, you would persist this ID to disk or database.
+Future<String> createAndCaptureSession(GeminiCliAdapter client) async {
   final config = GeminiSessionConfig(
     approvalMode: GeminiApprovalMode.yolo,
     sandbox: true,
   );
 
-  // First turn: Establish context
-  print('Turn 1: Establishing context...');
-  final session1 = await client.createSession(
+  print('Creating session and establishing context...');
+  final session = await client.createSession(
     'Remember this number: 42. Just say "OK, I will remember 42".',
     config,
   );
 
-  final sessionId = session1.sessionId;
-  print('Session ID: $sessionId');
+  // Capture the session ID immediately - this is what you'd store
+  // Note: Gemini uses a UUID for session IDs (not "latest")
+  final sessionId = session.sessionId;
 
-  await for (final event in session1.events) {
+  await for (final event in session.events) {
     if (event is GeminiMessageEvent && event.role == 'assistant') {
       print('Assistant: ${event.content}');
     }
     if (event is GeminiResultEvent) break;
   }
 
-  // Second turn: Recall context using the actual session ID
-  print('\nTurn 2: Recalling context...');
-  final session2 = await client.resumeSession(
+  // Return the session ID so it can be stored and used later
+  return sessionId;
+}
+
+/// Resume a session using a previously stored session ID.
+/// This could be called in a completely separate program execution.
+Future<void> resumeStoredSession(
+  GeminiCliAdapter client,
+  String sessionId,
+) async {
+  final config = GeminiSessionConfig(
+    approvalMode: GeminiApprovalMode.yolo,
+    sandbox: true,
+  );
+
+  print('Resuming session with stored ID: $sessionId');
+  final session = await client.resumeSession(
     sessionId, // Uses actual UUID, not "latest"
     'What number did I ask you to remember?',
     config,
   );
 
-  await for (final event in session2.events) {
+  await for (final event in session.events) {
     if (event is GeminiMessageEvent && event.role == 'assistant') {
       print('Assistant: ${event.content}');
     }
     if (event is GeminiResultEvent) {
-      print('Multi-turn conversation completed.');
+      print('Successfully resumed and completed session.');
       break;
     }
   }
 }
 
 /// Example with custom configuration options
-Future<void> customConfiguration(GeminiClient client) async {
+Future<void> customConfiguration(GeminiCliAdapter client) async {
   final config = GeminiSessionConfig(
     // autoEdit mode auto-approves file edits
     approvalMode: GeminiApprovalMode.autoEdit,
@@ -161,7 +180,7 @@ Future<void> customConfiguration(GeminiClient client) async {
 }
 
 /// Example of session cancellation (not run by default)
-Future<void> cancelSessionExample(GeminiClient client) async {
+Future<void> cancelSessionExample(GeminiCliAdapter client) async {
   final config = GeminiSessionConfig(
     approvalMode: GeminiApprovalMode.yolo,
     sandbox: true,

@@ -3,7 +3,8 @@
 /// This example shows:
 /// - Creating a session with fullAuto mode
 /// - Streaming events (thread.started, items, turn.completed)
-/// - Multi-turn conversations via resumeSession
+/// - Capturing thread ID for later resumption
+/// - Resuming a session with a stored thread ID
 /// - Configuration options (model, approval policy, sandbox)
 ///
 /// Prerequisites:
@@ -21,15 +22,18 @@ Future<void> main() async {
   final workDir = p.join(Directory.current.path, 'tmp');
   Directory(workDir).createSync(recursive: true);
 
-  final client = CodexClient(cwd: workDir);
+  final client = CodexCliAdapter(cwd: workDir);
 
   // Example 1: Simple single-turn session with fullAuto
   print('=== Example 1: Simple Session (fullAuto) ===');
   await simpleSingleTurn(client);
 
-  // Example 2: Multi-turn conversation
-  print('\n=== Example 2: Multi-Turn Conversation ===');
-  await multiTurnConversation(client);
+  // Example 2: Capture thread ID and resume later
+  print('\n=== Example 2: Capture and Resume Session ===');
+  final threadId = await createAndCaptureSession(client);
+  print('Stored thread ID: $threadId');
+  print('(This ID could be persisted to disk/database for later use)\n');
+  await resumeStoredSession(client, threadId);
 
   // Example 3: Custom configuration
   print('\n=== Example 3: Custom Configuration ===');
@@ -37,7 +41,7 @@ Future<void> main() async {
 }
 
 /// Simple single-turn session with fullAuto mode
-Future<void> simpleSingleTurn(CodexClient client) async {
+Future<void> simpleSingleTurn(CodexCliAdapter client) async {
   final config = CodexSessionConfig(
     // fullAuto skips approval and sandbox for automation
     fullAuto: true,
@@ -80,21 +84,21 @@ Future<void> simpleSingleTurn(CodexClient client) async {
   }
 }
 
-/// Multi-turn conversation using resumeSession
-Future<void> multiTurnConversation(CodexClient client) async {
+/// Create a session and return the thread ID for later resumption.
+/// In a real app, you would persist this ID to disk or database.
+Future<String> createAndCaptureSession(CodexCliAdapter client) async {
   final config = CodexSessionConfig(fullAuto: true);
 
-  // First turn: Establish context
-  print('Turn 1: Establishing context...');
-  final session1 = await client.createSession(
+  print('Creating session and establishing context...');
+  final session = await client.createSession(
     'Remember this secret word: BANANA. Just confirm you understood.',
     config,
   );
 
-  final threadId = session1.threadId;
-  print('Thread ID: $threadId');
+  // Capture the thread ID immediately - this is what you'd store
+  final threadId = session.threadId;
 
-  await for (final event in session1.events) {
+  await for (final event in session.events) {
     if (event is CodexItemCompletedEvent) {
       final item = event.item;
       if (item is CodexAgentMessageItem) {
@@ -104,15 +108,26 @@ Future<void> multiTurnConversation(CodexClient client) async {
     if (event is CodexTurnCompletedEvent) break;
   }
 
-  // Second turn: Recall context
-  print('\nTurn 2: Recalling context...');
-  final session2 = await client.resumeSession(
+  // Return the thread ID so it can be stored and used later
+  return threadId;
+}
+
+/// Resume a session using a previously stored thread ID.
+/// This could be called in a completely separate program execution.
+Future<void> resumeStoredSession(
+  CodexCliAdapter client,
+  String threadId,
+) async {
+  final config = CodexSessionConfig(fullAuto: true);
+
+  print('Resuming session with stored thread ID: $threadId');
+  final session = await client.resumeSession(
     threadId,
     'What was the secret word I asked you to remember?',
     config,
   );
 
-  await for (final event in session2.events) {
+  await for (final event in session.events) {
     if (event is CodexItemCompletedEvent) {
       final item = event.item;
       if (item is CodexAgentMessageItem) {
@@ -120,14 +135,14 @@ Future<void> multiTurnConversation(CodexClient client) async {
       }
     }
     if (event is CodexTurnCompletedEvent) {
-      print('Multi-turn conversation completed.');
+      print('Successfully resumed and completed session.');
       break;
     }
   }
 }
 
 /// Example with custom configuration options
-Future<void> customConfiguration(CodexClient client) async {
+Future<void> customConfiguration(CodexCliAdapter client) async {
   final config = CodexSessionConfig(
     // Explicit approval policy instead of fullAuto
     fullAuto: false,
@@ -161,7 +176,7 @@ Future<void> customConfiguration(CodexClient client) async {
 }
 
 /// Example of session cancellation (not run by default)
-Future<void> cancelSessionExample(CodexClient client) async {
+Future<void> cancelSessionExample(CodexCliAdapter client) async {
   final config = CodexSessionConfig(fullAuto: true);
 
   final session = await client.createSession(

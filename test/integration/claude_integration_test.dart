@@ -3,17 +3,17 @@ library;
 
 import 'dart:io';
 
-import 'package:coding_agents/src/cli_adapters/claude/claude_client.dart';
-import 'package:coding_agents/src/cli_adapters/claude/claude_config.dart';
-import 'package:coding_agents/src/cli_adapters/claude/claude_events.dart';
-import 'package:coding_agents/src/cli_adapters/claude/claude_types.dart';
+import 'package:coding_agents/src/cli_adapters/claude_code/claude_code_cli_adapter.dart';
+import 'package:coding_agents/src/cli_adapters/claude_code/claude_config.dart';
+import 'package:coding_agents/src/cli_adapters/claude_code/claude_events.dart';
+import 'package:coding_agents/src/cli_adapters/claude_code/claude_types.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 /// Integration tests for Claude Code CLI adapter
 /// These tests use the adapter layer which manages process lifecycle internally
 void main() {
-  late ClaudeClient client;
+  late ClaudeCodeCliAdapter client;
   late ClaudeSessionConfig config;
   late String testWorkDir;
 
@@ -24,7 +24,7 @@ void main() {
   });
 
   setUp(() {
-    client = ClaudeClient(cwd: testWorkDir);
+    client = ClaudeCodeCliAdapter(cwd: testWorkDir);
     config = ClaudeSessionConfig(
       permissionMode: ClaudePermissionMode.bypassPermissions,
       maxTurns: 1,
@@ -49,10 +49,16 @@ void main() {
       }
 
       // Verify we got expected event types
-      expect(events.any((e) => e is ClaudeSystemEvent), isTrue,
-          reason: 'Should have system init event');
-      expect(events.any((e) => e is ClaudeResultEvent), isTrue,
-          reason: 'Should have result event');
+      expect(
+        events.any((e) => e is ClaudeSystemEvent),
+        isTrue,
+        reason: 'Should have system init event',
+      );
+      expect(
+        events.any((e) => e is ClaudeResultEvent),
+        isTrue,
+        reason: 'Should have result event',
+      );
     });
 
     test('session streams assistant message content', () async {
@@ -70,55 +76,66 @@ void main() {
         if (event is ClaudeResultEvent) break;
       }
 
-      expect(assistantEvents, isNotEmpty,
-          reason: 'Should receive assistant messages');
-      expect(assistantEvents.first.content, isNotEmpty,
-          reason: 'Assistant message should have content');
+      expect(
+        assistantEvents,
+        isNotEmpty,
+        reason: 'Should receive assistant messages',
+      );
+      expect(
+        assistantEvents.first.content,
+        isNotEmpty,
+        reason: 'Assistant message should have content',
+      );
     });
 
-    test('session executes tool and returns tool_use in assistant message',
-        () async {
-      final toolConfig = ClaudeSessionConfig(
-        permissionMode: ClaudePermissionMode.bypassPermissions,
-        maxTurns: 3,
-      );
+    test(
+      'session executes tool and returns tool_use in assistant message',
+      () async {
+        final toolConfig = ClaudeSessionConfig(
+          permissionMode: ClaudePermissionMode.bypassPermissions,
+          maxTurns: 3,
+        );
 
-      final session = await client.createSession(
-        'Read the file pubspec.yaml and tell me the package name',
-        toolConfig,
-      );
+        final session = await client.createSession(
+          'Read the file pubspec.yaml and tell me the package name',
+          toolConfig,
+        );
 
-      final toolUseBlocks = <ClaudeToolUseBlock>[];
-      final userEvents = <ClaudeUserEvent>[];
+        final toolUseBlocks = <ClaudeToolUseBlock>[];
+        final userEvents = <ClaudeUserEvent>[];
 
-      await for (final event in session.events) {
-        if (event is ClaudeAssistantEvent) {
-          for (final block in event.content) {
-            if (block is ClaudeToolUseBlock) {
-              toolUseBlocks.add(block);
+        await for (final event in session.events) {
+          if (event is ClaudeAssistantEvent) {
+            for (final block in event.content) {
+              if (block is ClaudeToolUseBlock) {
+                toolUseBlocks.add(block);
+              }
             }
           }
+          if (event is ClaudeUserEvent) {
+            userEvents.add(event);
+          }
+          if (event is ClaudeResultEvent) break;
         }
-        if (event is ClaudeUserEvent) {
-          userEvents.add(event);
-        }
-        if (event is ClaudeResultEvent) break;
-      }
 
-      expect(toolUseBlocks, isNotEmpty,
-          reason: 'Should have tool_use blocks for reading file');
+        expect(
+          toolUseBlocks,
+          isNotEmpty,
+          reason: 'Should have tool_use blocks for reading file',
+        );
 
-      // Verify Read tool was used
-      final toolNames = toolUseBlocks.map((b) => b.name).toSet();
-      expect(toolNames.contains('Read'), isTrue,
-          reason: 'Should use Read tool to read pubspec.yaml');
-    });
+        // Verify Read tool was used
+        final toolNames = toolUseBlocks.map((b) => b.name).toSet();
+        expect(
+          toolNames.contains('Read'),
+          isTrue,
+          reason: 'Should use Read tool to read pubspec.yaml',
+        );
+      },
+    );
 
     test('result event contains success status', () async {
-      final session = await client.createSession(
-        'Say: "Done"',
-        config,
-      );
+      final session = await client.createSession('Say: "Done"', config);
 
       ClaudeResultEvent? resultEvent;
 
@@ -130,10 +147,16 @@ void main() {
       }
 
       expect(resultEvent, isNotNull, reason: 'Should receive result event');
-      expect(resultEvent!.subtype, equals('success'),
-          reason: 'Result should indicate success');
-      expect(resultEvent.sessionId, isNotNull,
-          reason: 'Result should include session_id');
+      expect(
+        resultEvent!.subtype,
+        equals('success'),
+        reason: 'Result should indicate success',
+      );
+      expect(
+        resultEvent.sessionId,
+        isNotNull,
+        reason: 'Result should include session_id',
+      );
     });
 
     test('can resume session with resumeSession', () async {
@@ -157,8 +180,11 @@ void main() {
         config,
       );
 
-      expect(session2.sessionId, equals(sessionId),
-          reason: 'Resumed session should have same ID');
+      expect(
+        session2.sessionId,
+        equals(sessionId),
+        reason: 'Resumed session should have same ID',
+      );
 
       final responses = <String>[];
 
@@ -175,15 +201,15 @@ void main() {
 
       // The response should mention 42
       final fullResponse = responses.join(' ');
-      expect(fullResponse.contains('42'), isTrue,
-          reason: 'Claude should remember the number from previous turn');
+      expect(
+        fullResponse.contains('42'),
+        isTrue,
+        reason: 'Claude should remember the number from previous turn',
+      );
     });
 
     test('session events include correct turnId', () async {
-      final session = await client.createSession(
-        'Say: "Turn test"',
-        config,
-      );
+      final session = await client.createSession('Say: "Turn test"', config);
 
       final turnIds = <int>{};
 
@@ -193,10 +219,16 @@ void main() {
       }
 
       // All events from same session should have same turnId
-      expect(turnIds.length, equals(1),
-          reason: 'All events should have same turnId');
-      expect(turnIds.first, equals(session.currentTurnId),
-          reason: 'TurnId should match session turnId');
+      expect(
+        turnIds.length,
+        equals(1),
+        reason: 'All events should have same turnId',
+      );
+      expect(
+        turnIds.first,
+        equals(session.currentTurnId),
+        reason: 'TurnId should match session turnId',
+      );
     });
   });
 }

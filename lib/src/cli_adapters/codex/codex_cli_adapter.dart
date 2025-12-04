@@ -17,13 +17,13 @@ class CodexProcessException implements Exception {
 }
 
 /// Client for interacting with Codex CLI
-class CodexClient {
+class CodexCliAdapter {
   /// Working directory for the Codex process
   final String cwd;
 
   int _turnCounter = 0;
 
-  CodexClient({required this.cwd});
+  CodexCliAdapter({required this.cwd});
 
   /// Create a new Codex session with the given prompt
   ///
@@ -49,24 +49,24 @@ class CodexClient {
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
-      final event = parseJsonLine(line, threadId, turnId);
-      if (event == null) return;
+          final event = parseJsonLine(line, threadId, turnId);
+          if (event == null) return;
 
-      // Capture thread ID from thread.started event
-      if (event is CodexThreadStartedEvent) {
-        threadId = event.threadId;
-        if (!threadIdCompleter.isCompleted) {
-          threadIdCompleter.complete(event.threadId);
-        }
-      }
+          // Capture thread ID from thread.started event
+          if (event is CodexThreadStartedEvent) {
+            threadId = event.threadId;
+            if (!threadIdCompleter.isCompleted) {
+              threadIdCompleter.complete(event.threadId);
+            }
+          }
 
-      // Buffer events until first subscription, then emit directly
-      if (isSubscribed) {
-        eventController.add(event);
-      } else {
-        bufferedEvents.add(event);
-      }
-    });
+          // Buffer events until first subscription, then emit directly
+          if (isSubscribed) {
+            eventController.add(event);
+          } else {
+            bufferedEvents.add(event);
+          }
+        });
 
     // When first listener subscribes, replay buffered events
     eventController.onListen = () {
@@ -128,16 +128,16 @@ class CodexClient {
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
-      final event = parseJsonLine(line, threadId, turnId);
-      if (event == null) return;
+          final event = parseJsonLine(line, threadId, turnId);
+          if (event == null) return;
 
-      // Buffer events until first subscription, then emit directly
-      if (isSubscribed) {
-        eventController.add(event);
-      } else {
-        bufferedEvents.add(event);
-      }
-    });
+          // Buffer events until first subscription, then emit directly
+          if (isSubscribed) {
+            eventController.add(event);
+          } else {
+            bufferedEvents.add(event);
+          }
+        });
 
     // When first listener subscribes, replay buffered events
     eventController.onListen = () {
