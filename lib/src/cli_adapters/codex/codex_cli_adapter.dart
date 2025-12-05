@@ -5,6 +5,7 @@ import 'dart:io';
 import 'codex_config.dart';
 import 'codex_events.dart';
 import 'codex_session.dart';
+import 'codex_types.dart';
 
 /// Exception thrown when Codex process encounters an error
 class CodexProcessException implements Exception {
@@ -25,6 +26,98 @@ class CodexCliAdapter {
 
   CodexCliAdapter({required this.cwd});
 
+  /// List all sessions
+  ///
+  /// Codex stores sessions in `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
+  Future<List<CodexSessionInfo>> listSessions() async {
+    final sessionsDir = Directory(
+      '${Platform.environment['HOME']}/.codex/sessions',
+    );
+
+    if (!await sessionsDir.exists()) {
+      return [];
+    }
+
+    final sessions = <CodexSessionInfo>[];
+
+    // Recursively search for .jsonl files
+    await for (final entity in sessionsDir.list(recursive: true)) {
+      if (entity is! File || !entity.path.endsWith('.jsonl')) continue;
+      final info = await _parseSessionFile(entity);
+      if (info != null) {
+        sessions.add(info);
+      }
+    }
+
+    // Sort by lastUpdated descending
+    sessions.sort((a, b) => b.lastUpdated.compareTo(a.lastUpdated));
+    return sessions;
+  }
+
+  Future<CodexSessionInfo?> _parseSessionFile(File file) async {
+    final lines = await file
+        .openRead()
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .take(10)
+        .toList();
+
+    if (lines.isEmpty) return null;
+
+    String? threadId;
+    DateTime? timestamp;
+    String? sessionCwd;
+    String? gitBranch;
+
+    for (final line in lines) {
+      if (!line.trim().startsWith('{')) continue;
+      final json = jsonDecode(line) as Map<String, dynamic>;
+
+      // Extract session ID from session_meta event (new format)
+      if (json['type'] == 'session_meta') {
+        final payload = json['payload'] as Map<String, dynamic>?;
+        if (payload != null) {
+          threadId = payload['id'] as String?;
+          sessionCwd = payload['cwd'] as String?;
+          final ts = payload['timestamp'] as String?;
+          if (ts != null) {
+            timestamp = DateTime.tryParse(ts);
+          }
+          // Extract git branch if available
+          final git = payload['git'] as Map<String, dynamic>?;
+          if (git != null) {
+            gitBranch = git['branch'] as String?;
+          }
+        }
+        break;
+      }
+
+      // Fall back to thread.started event (legacy format)
+      if (json['type'] == 'thread.started') {
+        threadId = json['thread_id'] as String?;
+        final ts = json['timestamp'] as String?;
+        if (ts != null) {
+          timestamp = DateTime.tryParse(ts);
+        }
+        break;
+      }
+    }
+
+    if (threadId == null) return null;
+
+    final stat = await file.stat();
+    final lastUpdated = stat.modified;
+    timestamp ??= stat.modified;
+
+    return CodexSessionInfo(
+      threadId: threadId,
+      timestamp: timestamp,
+      lastUpdated: lastUpdated,
+      cwd: sessionCwd ?? cwd,
+      gitBranch: gitBranch,
+    );
+  }
+
   /// Create a new Codex session with the given prompt
   ///
   /// Spawns a Codex process for the initial turn.
@@ -39,10 +132,17 @@ class CodexCliAdapter {
     final process = await Process.start('codex', args, workingDirectory: cwd);
     final eventController = StreamController<CodexEvent>();
     final bufferedEvents = <CodexEvent>[];
+    final stderrBuffer = StringBuffer();
+    String? lastErrorMessage;
 
     final threadIdCompleter = Completer<String>();
     var isSubscribed = false;
     String threadId = '';
+
+    // Capture stderr for error reporting
+    process.stderr.transform(utf8.decoder).listen((data) {
+      stderrBuffer.write(data);
+    });
 
     // Parse stdout JSONL
     process.stdout
@@ -58,6 +158,11 @@ class CodexCliAdapter {
             if (!threadIdCompleter.isCompleted) {
               threadIdCompleter.complete(event.threadId);
             }
+          }
+
+          // Capture error messages from error events
+          if (event is CodexErrorEvent) {
+            lastErrorMessage = event.message;
           }
 
           // Buffer events until first subscription, then emit directly
@@ -78,11 +183,24 @@ class CodexCliAdapter {
     };
 
     // Handle process exit
-    process.exitCode.then((code) {
-      if (code != 0 && !eventController.isClosed) {
-        eventController.addError(
-          CodexProcessException('Codex process exited with code $code'),
-        );
+    process.exitCode.then((code) async {
+      if (code != 0) {
+        // Wait a moment for stderr to finish
+        await Future.delayed(const Duration(milliseconds: 100));
+        final stderr = stderrBuffer.toString().trim();
+        // Prefer error from JSONL events, fall back to stderr
+        final errorDetail = lastErrorMessage ?? stderr;
+        final message = errorDetail.isNotEmpty
+            ? 'Codex process exited with code $code: $errorDetail'
+            : 'Codex process exited with code $code';
+        final exception = CodexProcessException(message);
+        // Complete thread ID completer with error if not yet completed
+        if (!threadIdCompleter.isCompleted) {
+          threadIdCompleter.completeError(exception);
+        }
+        if (!eventController.isClosed) {
+          eventController.addError(exception);
+        }
       }
       if (!eventController.isClosed) {
         eventController.close();
@@ -120,8 +238,15 @@ class CodexCliAdapter {
     final process = await Process.start('codex', args, workingDirectory: cwd);
     final eventController = StreamController<CodexEvent>();
     final bufferedEvents = <CodexEvent>[];
+    final stderrBuffer = StringBuffer();
+    String? lastErrorMessage;
 
     var isSubscribed = false;
+
+    // Capture stderr for error reporting
+    process.stderr.transform(utf8.decoder).listen((data) {
+      stderrBuffer.write(data);
+    });
 
     // Parse stdout JSONL
     process.stdout
@@ -130,6 +255,11 @@ class CodexCliAdapter {
         .listen((line) {
           final event = parseJsonLine(line, threadId, turnId);
           if (event == null) return;
+
+          // Capture error messages from error events
+          if (event is CodexErrorEvent) {
+            lastErrorMessage = event.message;
+          }
 
           // Buffer events until first subscription, then emit directly
           if (isSubscribed) {
@@ -149,11 +279,17 @@ class CodexCliAdapter {
     };
 
     // Handle process exit
-    process.exitCode.then((code) {
+    process.exitCode.then((code) async {
       if (code != 0 && !eventController.isClosed) {
-        eventController.addError(
-          CodexProcessException('Codex process exited with code $code'),
-        );
+        // Wait a moment for stderr to finish
+        await Future.delayed(const Duration(milliseconds: 100));
+        final stderr = stderrBuffer.toString().trim();
+        // Prefer error from JSONL events, fall back to stderr
+        final errorDetail = lastErrorMessage ?? stderr;
+        final message = errorDetail.isNotEmpty
+            ? 'Codex process exited with code $code: $errorDetail'
+            : 'Codex process exited with code $code';
+        eventController.addError(CodexProcessException(message));
       }
       if (!eventController.isClosed) {
         eventController.close();
@@ -214,6 +350,11 @@ class CodexCliAdapter {
       }
     }
 
+    // Extra args (for testing or advanced use)
+    if (config.extraArgs != null) {
+      args.addAll(config.extraArgs!);
+    }
+
     // Prompt
     args.add(prompt);
 
@@ -263,6 +404,11 @@ class CodexCliAdapter {
         args.add('-c');
         args.add(override);
       }
+    }
+
+    // Extra args (for testing or advanced use)
+    if (config.extraArgs != null) {
+      args.addAll(config.extraArgs!);
     }
 
     // Resume command with thread ID and prompt

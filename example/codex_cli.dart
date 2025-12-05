@@ -5,6 +5,7 @@
 /// - Streaming events (thread.started, items, turn.completed)
 /// - Capturing thread ID for later resumption
 /// - Resuming a session with a stored thread ID
+/// - Listing sessions and verifying the captured ID is present
 /// - Configuration options (model, approval policy, sandbox)
 ///
 /// Prerequisites:
@@ -35,8 +36,12 @@ Future<void> main() async {
   print('(This ID could be persisted to disk/database for later use)\n');
   await resumeStoredSession(client, threadId);
 
-  // Example 3: Custom configuration
-  print('\n=== Example 3: Custom Configuration ===');
+  // Example 3: List sessions and verify our session is present
+  print('\n=== Example 3: List and Verify Sessions ===');
+  await listAndVerifySession(client, threadId);
+
+  // Example 4: Custom configuration
+  print('\n=== Example 4: Custom Configuration ===');
   await customConfiguration(client);
 }
 
@@ -138,6 +143,35 @@ Future<void> resumeStoredSession(
       print('Successfully resumed and completed session.');
       break;
     }
+  }
+}
+
+/// List all sessions and verify the captured thread ID is present.
+/// This demonstrates that persisted thread IDs can be discovered via listSessions.
+Future<void> listAndVerifySession(
+  CodexCliAdapter client,
+  String expectedThreadId,
+) async {
+  final sessions = await client.listSessions();
+
+  if (sessions.isEmpty) {
+    print('No existing sessions found.');
+    return;
+  }
+
+  print('Found ${sessions.length} session(s):');
+  for (final info in sessions.take(5)) {
+    print('  - ${info.threadId}');
+    print('    Created: ${info.timestamp}');
+    print('    Updated: ${info.lastUpdated}');
+  }
+
+  // Verify the session we created earlier is in the list
+  final found = sessions.any((s) => s.threadId == expectedThreadId);
+  if (found) {
+    print('\nVerified: Session $expectedThreadId found in list.');
+  } else {
+    print('\nWarning: Session $expectedThreadId not found in list.');
   }
 }
 

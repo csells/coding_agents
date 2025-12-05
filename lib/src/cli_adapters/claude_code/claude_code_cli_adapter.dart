@@ -50,8 +50,10 @@ class ClaudeCodeCliAdapter {
   }
 
   /// List all sessions for this working directory
+  ///
+  /// Claude encodes paths by replacing `/` and `_` with `-`
   Future<List<ClaudeSessionInfo>> listSessions() async {
-    final encodedCwd = cwd.replaceAll('/', '-');
+    final encodedCwd = cwd.replaceAll('/', '-').replaceAll('_', '-');
     final projectDir = Directory(
       '${Platform.environment['HOME']}/.claude/projects/$encodedCwd',
     );
@@ -92,9 +94,15 @@ class ClaudeCodeCliAdapter {
     final process = await Process.start('claude', args, workingDirectory: cwd);
     final eventController = StreamController<ClaudeEvent>();
     final bufferedEvents = <ClaudeEvent>[];
+    final stderrBuffer = StringBuffer();
 
     final sessionIdCompleter = Completer<String>();
     var isSubscribed = false;
+
+    // Capture stderr for error reporting
+    process.stderr.transform(utf8.decoder).listen((data) {
+      stderrBuffer.write(data);
+    });
 
     // Parse stdout JSONL
     process.stdout
@@ -109,6 +117,15 @@ class ClaudeCodeCliAdapter {
               event.subtype == 'init' &&
               !sessionIdCompleter.isCompleted) {
             sessionIdCompleter.complete(event.sessionId);
+          }
+
+          // Check for API errors in result events and throw exception
+          if (event is ClaudeResultEvent && event.isError) {
+            // Error details are in result field, fall back to error field
+            final errorMsg =
+                event.result ?? event.error ?? 'API error occurred';
+            eventController.addError(ClaudeProcessException(errorMsg));
+            return;
           }
 
           // Buffer events until first subscription, then emit directly
@@ -129,11 +146,22 @@ class ClaudeCodeCliAdapter {
     };
 
     // Handle process exit
-    process.exitCode.then((code) {
-      if (code != 0 && !eventController.isClosed) {
-        eventController.addError(
-          ClaudeProcessException('Claude process exited with code $code'),
-        );
+    process.exitCode.then((code) async {
+      if (code != 0) {
+        // Wait a moment for stderr to finish
+        await Future.delayed(const Duration(milliseconds: 100));
+        final stderr = stderrBuffer.toString().trim();
+        final message = stderr.isNotEmpty
+            ? 'Claude process exited with code $code: $stderr'
+            : 'Claude process exited with code $code';
+        final exception = ClaudeProcessException(message);
+        // Complete session ID completer with error if not yet completed
+        if (!sessionIdCompleter.isCompleted) {
+          sessionIdCompleter.completeError(exception);
+        }
+        if (!eventController.isClosed) {
+          eventController.addError(exception);
+        }
       }
       if (!eventController.isClosed) {
         eventController.close();
@@ -213,6 +241,11 @@ class ClaudeCodeCliAdapter {
       args.addAll(config.disallowedTools!);
     }
 
+    // Extra args (for testing or advanced use)
+    if (config.extraArgs != null) {
+      args.addAll(config.extraArgs!);
+    }
+
     return args;
   }
 
@@ -267,14 +300,23 @@ class ClaudeCodeCliAdapter {
 
       final json = jsonDecode(line) as Map<String, dynamic>;
 
-      // Extract session info from system init event
-      if (json['type'] == 'system' && json['subtype'] == 'init') {
-        sessionId = json['session_id'] as String?;
+      // Extract session info from any event that has sessionId
+      // The first event is usually queue-operation or user with sessionId
+      if (sessionId == null && json.containsKey('sessionId')) {
+        sessionId = json['sessionId'] as String?;
         final ts = json['timestamp'] as String?;
         if (ts != null) {
           timestamp = DateTime.tryParse(ts);
         }
       }
+
+      // Extract git branch from user event
+      if (gitBranch == null && json['type'] == 'user') {
+        gitBranch = json['gitBranch'] as String?;
+      }
+
+      // Stop once we have both sessionId and gitBranch
+      if (sessionId != null && gitBranch != null) break;
     }
 
     if (sessionId == null) return null;

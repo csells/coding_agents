@@ -27,6 +27,9 @@ class CodexSessionConfig {
   /// Useful for overriding user config settings
   final List<String>? configOverrides;
 
+  /// Extra CLI arguments to pass (for testing or advanced use)
+  final List<String>? extraArgs;
+
   CodexSessionConfig({
     this.approvalPolicy = CodexApprovalPolicy.onRequest,
     this.sandboxMode = CodexSandboxMode.workspaceWrite,
@@ -36,5 +39,6 @@ class CodexSessionConfig {
     this.enableWebSearch = false,
     this.environment,
     this.configOverrides,
+    this.extraArgs,
   });
 }

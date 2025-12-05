@@ -181,12 +181,17 @@ class GeminiSessionConfig {
   /// Enable debug output
   final bool debug;
 
+  /// Extra CLI arguments to pass (for testing or advanced use)
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  final List<String>? extraArgs;
+
   GeminiSessionConfig({
     this.approvalMode = GeminiApprovalMode.defaultMode,
     this.sandbox = false,
     this.sandboxImage,
     this.model,
     this.debug = false,
+    this.extraArgs,
   });
 
   factory GeminiSessionConfig.fromJson(Map<String, dynamic> json) =>

@@ -28,7 +28,7 @@ dart test test/coding_agents_test.dart
 # Run example
 dart run example/main.dart
 
-# Generate JSON serialization code (when json_annotation is added)
+# Generate JSON serialization code (after modifying @JsonSerializable classes)
 dart run build_runner build
 ```
 
@@ -46,14 +46,14 @@ dart run build_runner build
 - **Errors as exceptions**: No try-catch wrappers; exceptions propagate to
   consumer
 
-### Planned Directory Structure
+### Directory Structure
 ```
 lib/
 └── src/
-    └── adapters/
-        ├── claude/    # Claude Code adapter (long-lived bidirectional JSONL)
-        ├── codex/     # Codex CLI adapter (process-per-turn)
-        └── gemini/    # Gemini CLI adapter (process-per-turn)
+    └── cli_adapters/
+        ├── claude_code/  # Claude Code adapter (long-lived bidirectional JSONL)
+        ├── codex/        # Codex CLI adapter (process-per-turn)
+        └── gemini/       # Gemini CLI adapter (process-per-turn)
 ```
 
 ### Multi-Turn Architecture Patterns
@@ -67,14 +67,13 @@ lib/
 ### Common Adapter Pattern
 ```dart
 Client (per CWD)
-  ├── createSession(config) → Session
-  ├── resumeSession(sessionId) → Session
-  └── listSessions() → List<SessionInfo>
+  ├── createSession(prompt, config) → Session
+  ├── resumeSession(sessionId, prompt, config) → Session
+  └── listSessions() → List<SessionInfo>  // Claude only
 
 Session
-  ├── sessionId: String
+  ├── sessionId: String (threadId for Codex)
   ├── events: Stream<Event>
-  ├── send(message) → void
   └── cancel() → void
 ```
 
@@ -111,9 +110,9 @@ From [specs/best-practices.md](specs/best-practices.md):
 
 ## Dependencies
 
-Core Dart libraries only for now. Planned dependencies:
-- `json_annotation` / `json_serializable`: JSON serialization
-- `mcp_dart`: MCP server implementation for Claude permission delegation
+- `json_annotation` / `json_serializable`: JSON serialization for event and config types
+- `path`: Path manipulation utilities
+- Planned: `mcp_dart` for MCP server implementation (Claude permission delegation)
 
 ## Coding Agent Protocol
 

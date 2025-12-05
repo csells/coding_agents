@@ -162,7 +162,7 @@ void main() {
     test('can resume session with resumeSession', () async {
       // First turn - create a session
       final session1 = await client.createSession(
-        'Remember this number: 42. Just say OK.',
+        'Hi! My name is Chris!',
         config,
       );
 
@@ -176,7 +176,7 @@ void main() {
       // Second turn - resume session
       final session2 = await client.resumeSession(
         sessionId,
-        'What number did I ask you to remember?',
+        'Say my name.',
         config,
       );
 
@@ -199,12 +199,12 @@ void main() {
         if (event is ClaudeResultEvent) break;
       }
 
-      // The response should mention 42
-      final fullResponse = responses.join(' ');
+      // The response should mention Chris
+      final fullResponse = responses.join(' ').toLowerCase();
       expect(
-        fullResponse.contains('42'),
+        fullResponse.contains('chris'),
         isTrue,
-        reason: 'Claude should remember the number from previous turn',
+        reason: 'Claude should remember the name from previous turn',
       );
     });
 
@@ -230,5 +230,90 @@ void main() {
         reason: 'TurnId should match session turnId',
       );
     });
+
+    test('listSessions returns sessions including created session', () async {
+      // Create a session
+      final session = await client.createSession(
+        'Say: "List test"',
+        config,
+      );
+
+      final sessionId = session.sessionId;
+
+      // Wait for session to complete
+      await for (final event in session.events) {
+        if (event is ClaudeResultEvent) break;
+      }
+
+      // List sessions
+      final sessions = await client.listSessions();
+
+      // Verify our session is in the list
+      expect(
+        sessions,
+        isNotEmpty,
+        reason: 'Should have at least one session',
+      );
+      expect(
+        sessions.any((s) => s.sessionId == sessionId),
+        isTrue,
+        reason: 'Created session should be in the list',
+      );
+    });
+
+    test('API errors throw exception with error details', () async {
+      // Use an invalid model name to trigger an API error
+      final badConfig = ClaudeSessionConfig(
+        permissionMode: ClaudePermissionMode.bypassPermissions,
+        model: 'invalid-model-that-does-not-exist-xyz',
+      );
+
+      final session = await client.createSession('Say hello', badConfig);
+
+      // Expect exception to be thrown with error details
+      expect(
+        () async {
+          await for (final event in session.events) {
+            if (event is ClaudeResultEvent) break;
+          }
+        },
+        throwsA(
+          isA<ClaudeProcessException>().having(
+            (e) => e.message,
+            'message',
+            contains('invalid-model'),
+          ),
+        ),
+        reason: 'Exception should contain error details from API',
+      );
+    });
+
+    test('CLI errors throw exception with stderr details', () async {
+      // Use an invalid CLI flag to trigger a CLI error
+      final badConfig = ClaudeSessionConfig(
+        permissionMode: ClaudePermissionMode.bypassPermissions,
+        extraArgs: ['--fail-for-me-please'],
+      );
+
+      // Expect createSession to fail with CLI error details
+      expect(
+        () async {
+          final session = await client.createSession('Say hello', badConfig);
+          await for (final event in session.events) {
+            if (event is ClaudeResultEvent) break;
+          }
+        },
+        throwsA(
+          isA<ClaudeProcessException>().having(
+            (e) => e.message,
+            'message',
+            // Claude CLI outputs: "error: unknown option '--fail-for-me-please'"
+            contains('unknown'),
+          ),
+        ),
+        reason: 'Exception should contain error details from CLI stderr',
+      );
+    });
+
   });
 }

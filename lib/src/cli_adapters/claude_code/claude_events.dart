@@ -121,6 +121,8 @@ class ClaudeUserEvent extends ClaudeEvent {
 /// Turn/session result event
 class ClaudeResultEvent extends ClaudeEvent {
   final String subtype; // "success", "error", "cancelled"
+  final bool isError; // true if the result contains an error
+  final String? result; // result text (contains error message when isError)
   final double? costUsd;
   final int? durationMs;
   final ClaudeUsage? usage;
@@ -131,6 +133,8 @@ class ClaudeResultEvent extends ClaudeEvent {
     required super.turnId,
     required super.timestamp,
     required this.subtype,
+    this.isError = false,
+    this.result,
     this.costUsd,
     this.durationMs,
     this.usage,
@@ -144,6 +148,8 @@ class ClaudeResultEvent extends ClaudeEvent {
         timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
             DateTime.now(),
         subtype: json['subtype'] as String? ?? 'unknown',
+        isError: json['is_error'] as bool? ?? false,
+        result: json['result'] as String?,
         costUsd: (json['cost_usd'] as num?)?.toDouble(),
         durationMs: json['duration_ms'] as int?,
         usage: json['usage'] != null

@@ -24,6 +24,93 @@ class GeminiCliAdapter {
 
   GeminiCliAdapter({required this.cwd});
 
+  /// List all sessions for this working directory
+  ///
+  /// Parses the text output from `gemini --list-sessions` which has format:
+  /// ```
+  /// Available sessions for this project (N):
+  ///   1. Prompt text (time ago) [session-uuid]
+  /// ```
+  Future<List<GeminiSessionInfo>> listSessions() async {
+    final result = await Process.run(
+      'gemini',
+      ['--list-sessions'],
+      workingDirectory: cwd,
+    );
+
+    if (result.exitCode != 0) {
+      throw GeminiProcessException('Failed to list sessions: ${result.stderr}');
+    }
+
+    // Gemini CLI writes list output to stderr
+    final output = result.stderr as String;
+    if (output.trim().isEmpty) return [];
+
+    final sessions = <GeminiSessionInfo>[];
+    final now = DateTime.now();
+
+    // Pattern: "  1. Prompt text (time ago) [session-uuid]"
+    final linePattern = RegExp(r'^\s*\d+\.\s+.+\s+\(([^)]+)\)\s+\[([a-f0-9-]+)\]$');
+
+    for (final line in output.split('\n')) {
+      final match = linePattern.firstMatch(line);
+      if (match != null) {
+        final timeAgo = match.group(1)!;
+        final sessionId = match.group(2)!;
+
+        // Parse relative time to approximate DateTime
+        final timestamp = _parseRelativeTime(timeAgo, now);
+
+        sessions.add(GeminiSessionInfo(
+          sessionId: sessionId,
+          projectHash: '', // Not available from CLI output
+          startTime: timestamp,
+          lastUpdated: timestamp,
+          messageCount: 0, // Not available from CLI output
+        ));
+      }
+    }
+
+    return sessions;
+  }
+
+  /// Parse relative time strings like "1 hour ago", "Just now", "2 days ago"
+  DateTime _parseRelativeTime(String timeAgo, DateTime now) {
+    final lower = timeAgo.toLowerCase();
+
+    if (lower == 'just now') {
+      return now;
+    }
+
+    final pattern = RegExp(r'(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago');
+    final match = pattern.firstMatch(lower);
+
+    if (match != null) {
+      final amount = int.parse(match.group(1)!);
+      final unit = match.group(2)!;
+
+      switch (unit) {
+        case 'second':
+          return now.subtract(Duration(seconds: amount));
+        case 'minute':
+          return now.subtract(Duration(minutes: amount));
+        case 'hour':
+          return now.subtract(Duration(hours: amount));
+        case 'day':
+          return now.subtract(Duration(days: amount));
+        case 'week':
+          return now.subtract(Duration(days: amount * 7));
+        case 'month':
+          return now.subtract(Duration(days: amount * 30));
+        case 'year':
+          return now.subtract(Duration(days: amount * 365));
+      }
+    }
+
+    // Default to now if we can't parse
+    return now;
+  }
+
   /// Create a new Gemini session with the given prompt
   ///
   /// Spawns a Gemini process for the initial turn.
@@ -38,10 +125,16 @@ class GeminiCliAdapter {
     final process = await Process.start('gemini', args, workingDirectory: cwd);
     final eventController = StreamController<GeminiEvent>();
     final bufferedEvents = <GeminiEvent>[];
+    final stderrBuffer = StringBuffer();
 
     final sessionIdCompleter = Completer<String>();
     var isSubscribed = false;
     String sessionId = '';
+
+    // Capture stderr for error reporting
+    process.stderr.transform(utf8.decoder).listen((data) {
+      stderrBuffer.write(data);
+    });
 
     // Parse stdout JSONL
     process.stdout
@@ -57,6 +150,14 @@ class GeminiCliAdapter {
             if (!sessionIdCompleter.isCompleted) {
               sessionIdCompleter.complete(event.sessionId);
             }
+          }
+
+          // Check for API errors in result events and throw exception
+          if (event is GeminiResultEvent && event.status == 'error') {
+            final errorMsg = event.error?['message'] as String? ??
+                'Gemini API error occurred';
+            eventController.addError(GeminiProcessException(errorMsg));
+            return;
           }
 
           // Buffer events until first subscription, then emit directly
@@ -77,11 +178,22 @@ class GeminiCliAdapter {
     };
 
     // Handle process exit
-    process.exitCode.then((code) {
-      if (code != 0 && !eventController.isClosed) {
-        eventController.addError(
-          GeminiProcessException('Gemini process exited with code $code'),
-        );
+    process.exitCode.then((code) async {
+      if (code != 0) {
+        // Wait a moment for stderr to finish
+        await Future.delayed(const Duration(milliseconds: 100));
+        final stderr = stderrBuffer.toString().trim();
+        final message = stderr.isNotEmpty
+            ? 'Gemini process exited with code $code: $stderr'
+            : 'Gemini process exited with code $code';
+        final exception = GeminiProcessException(message);
+        // Complete session ID completer with error if not yet completed
+        if (!sessionIdCompleter.isCompleted) {
+          sessionIdCompleter.completeError(exception);
+        }
+        if (!eventController.isClosed) {
+          eventController.addError(exception);
+        }
       }
       if (!eventController.isClosed) {
         eventController.close();
@@ -120,8 +232,14 @@ class GeminiCliAdapter {
     final process = await Process.start('gemini', args, workingDirectory: cwd);
     final eventController = StreamController<GeminiEvent>();
     final bufferedEvents = <GeminiEvent>[];
+    final stderrBuffer = StringBuffer();
 
     var isSubscribed = false;
+
+    // Capture stderr for error reporting
+    process.stderr.transform(utf8.decoder).listen((data) {
+      stderrBuffer.write(data);
+    });
 
     // Parse stdout JSONL
     process.stdout
@@ -130,6 +248,14 @@ class GeminiCliAdapter {
         .listen((line) {
           final event = parseJsonLine(line, sessionId, turnId);
           if (event == null) return;
+
+          // Check for API errors in result events and throw exception
+          if (event is GeminiResultEvent && event.status == 'error') {
+            final errorMsg = event.error?['message'] as String? ??
+                'Gemini API error occurred';
+            eventController.addError(GeminiProcessException(errorMsg));
+            return;
+          }
 
           // Buffer events until first subscription, then emit directly
           if (isSubscribed) {
@@ -149,11 +275,15 @@ class GeminiCliAdapter {
     };
 
     // Handle process exit
-    process.exitCode.then((code) {
+    process.exitCode.then((code) async {
       if (code != 0 && !eventController.isClosed) {
-        eventController.addError(
-          GeminiProcessException('Gemini process exited with code $code'),
-        );
+        // Wait a moment for stderr to finish
+        await Future.delayed(const Duration(milliseconds: 100));
+        final stderr = stderrBuffer.toString().trim();
+        final message = stderr.isNotEmpty
+            ? 'Gemini process exited with code $code: $stderr'
+            : 'Gemini process exited with code $code';
+        eventController.addError(GeminiProcessException(message));
       }
       if (!eventController.isClosed) {
         eventController.close();
@@ -209,6 +339,11 @@ class GeminiCliAdapter {
       args.add('--debug');
     }
 
+    // Extra args (for testing or advanced use)
+    if (config.extraArgs != null) {
+      args.addAll(config.extraArgs!);
+    }
+
     return args;
   }
 
@@ -250,6 +385,11 @@ class GeminiCliAdapter {
     // Debug
     if (config.debug) {
       args.add('--debug');
+    }
+
+    // Extra args (for testing or advanced use)
+    if (config.extraArgs != null) {
+      args.addAll(config.extraArgs!);
     }
 
     return args;

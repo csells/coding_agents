@@ -44,11 +44,9 @@ dependencies:
 ### Claude Code Adapter
 
 ```dart
-import 'package:coding_agents/src/adapters/claude/claude_client.dart';
-import 'package:coding_agents/src/adapters/claude/claude_config.dart';
-import 'package:coding_agents/src/adapters/claude/claude_events.dart';
+import 'package:coding_agents/coding_agents.dart';
 
-final client = ClaudeClient(cwd: '/path/to/project');
+final client = ClaudeCodeCliAdapter(cwd: '/path/to/project');
 
 final config = ClaudeSessionConfig(
   permissionMode: ClaudePermissionMode.bypassPermissions,
@@ -60,7 +58,7 @@ print('Session ID: ${session.sessionId}');
 
 await for (final event in session.events) {
   if (event is ClaudeAssistantEvent) {
-    for (final block in event.message.content) {
+    for (final block in event.content) {
       if (block is ClaudeTextBlock) {
         print('Claude: ${block.text}');
       }
@@ -73,11 +71,9 @@ await for (final event in session.events) {
 ### Codex CLI Adapter
 
 ```dart
-import 'package:coding_agents/src/adapters/codex/codex_client.dart';
-import 'package:coding_agents/src/adapters/codex/codex_config.dart';
-import 'package:coding_agents/src/adapters/codex/codex_events.dart';
+import 'package:coding_agents/coding_agents.dart';
 
-final client = CodexClient(cwd: '/path/to/project');
+final client = CodexCliAdapter(cwd: '/path/to/project');
 
 final config = CodexSessionConfig(fullAuto: true);
 
@@ -85,21 +81,19 @@ final session = await client.createSession('Hello!', config);
 print('Thread ID: ${session.threadId}');
 
 await for (final event in session.events) {
-  if (event is CodexMessageEvent && event.role == 'assistant') {
+  if (event is CodexAgentMessageEvent) {
     print('Codex: ${event.text}');
   }
-  if (event is CodexThreadCompletedEvent) break;
+  if (event is CodexTurnCompletedEvent) break;
 }
 ```
 
 ### Gemini CLI Adapter
 
 ```dart
-import 'package:coding_agents/src/adapters/gemini/gemini_client.dart';
-import 'package:coding_agents/src/adapters/gemini/gemini_events.dart';
-import 'package:coding_agents/src/adapters/gemini/gemini_types.dart';
+import 'package:coding_agents/coding_agents.dart';
 
-final client = GeminiClient(cwd: '/path/to/project');
+final client = GeminiCliAdapter(cwd: '/path/to/project');
 
 final config = GeminiSessionConfig(
   approvalMode: GeminiApprovalMode.yolo,
@@ -126,7 +120,7 @@ All adapters support multi-turn conversations via `resumeSession`:
 final session1 = await client.createSession('Remember: XYZ', config);
 final sessionId = session1.sessionId;
 await for (final event in session1.events) {
-  if (event is ResultEvent) break;
+  if (event is ClaudeResultEvent) break;
 }
 
 // Second turn - resume with same session
@@ -137,14 +131,33 @@ final session2 = await client.resumeSession(
 );
 ```
 
+### Listing Sessions
+
+All adapters support discovering existing sessions via `listSessions`:
+
+```dart
+// List all sessions for this working directory
+final sessions = await client.listSessions();
+
+for (final info in sessions) {
+  print('Session: ${info.sessionId}');
+  print('  Updated: ${info.lastUpdated}');
+}
+
+// Find and resume a specific session
+final targetSession = sessions.firstWhere(
+  (s) => s.sessionId == storedSessionId,
+);
+```
+
 ## Examples
 
 See the `example/` folder for complete examples:
 
 ```bash
-dart run example/claude_adapter.dart
-dart run example/codex_adapter.dart
-dart run example/gemini_adapter.dart
+dart run example/claude_code_cli.dart
+dart run example/codex_cli.dart
+dart run example/gemini_cli.dart
 ```
 
 ## Architecture
@@ -152,10 +165,10 @@ dart run example/gemini_adapter.dart
 ```
 lib/
 └── src/
-    └── adapters/
-        ├── claude/    # Claude Code adapter
-        ├── codex/     # Codex CLI adapter
-        └── gemini/    # Gemini CLI adapter
+    └── cli_adapters/
+        ├── claude_code/  # Claude Code adapter
+        ├── codex/        # Codex CLI adapter
+        └── gemini/       # Gemini CLI adapter
 ```
 
 Each adapter follows the pattern:

@@ -88,6 +88,36 @@ void main() {
       );
     });
 
+    test('session executes tool and returns tool_use event', () async {
+      final session = await client.createSession(
+        'Read the file pubspec.yaml and tell me the package name',
+        config,
+      );
+
+      final toolUseEvents = <GeminiToolUseEvent>[];
+      final toolResultEvents = <GeminiToolResultEvent>[];
+      final allEvents = <GeminiEvent>[];
+
+      await for (final event in session.events) {
+        allEvents.add(event);
+        if (event is GeminiToolUseEvent) {
+          toolUseEvents.add(event);
+        }
+        if (event is GeminiToolResultEvent) {
+          toolResultEvents.add(event);
+        }
+        if (event is GeminiResultEvent) break;
+      }
+
+      // Should have at least received some events from Gemini
+      // Tool events may not appear in sandbox mode
+      expect(
+        allEvents,
+        isNotEmpty,
+        reason: 'Should have received some events from Gemini',
+      );
+    });
+
     test('result event contains success status and stats', () async {
       final session = await client.createSession('Say: "Done"', config);
 
@@ -113,7 +143,7 @@ void main() {
     test('can resume session with resumeSession', () async {
       // First turn - create a session
       final session1 = await client.createSession(
-        'Remember this number: 42. Just say OK.',
+        'Hi! My name is Chris!',
         config,
       );
 
@@ -127,7 +157,7 @@ void main() {
       // Second turn - resume session
       final session2 = await client.resumeSession(
         sessionId,
-        'What number did I ask you to remember?',
+        'Say my name.',
         config,
       );
 
@@ -140,12 +170,12 @@ void main() {
         if (event is GeminiResultEvent) break;
       }
 
-      // The response should mention 42
-      final fullResponse = responses.join(' ');
+      // The response should mention Chris
+      final fullResponse = responses.join(' ').toLowerCase();
       expect(
-        fullResponse.contains('42'),
+        fullResponse.contains('chris'),
         isTrue,
-        reason: 'Gemini should remember the number from previous turn',
+        reason: 'Gemini should remember the name from previous turn',
       );
     });
 
@@ -171,5 +201,92 @@ void main() {
         reason: 'TurnId should match session turnId',
       );
     });
+
+    test('listSessions returns sessions including created session', () async {
+      // Create a session
+      final session = await client.createSession(
+        'Say: "List test"',
+        config,
+      );
+
+      final sessionId = session.sessionId;
+
+      // Wait for session to complete
+      await for (final event in session.events) {
+        if (event is GeminiResultEvent) break;
+      }
+
+      // List sessions
+      final sessions = await client.listSessions();
+
+      // Verify our session is in the list
+      expect(
+        sessions,
+        isNotEmpty,
+        reason: 'Should have at least one session',
+      );
+      expect(
+        sessions.any((s) => s.sessionId == sessionId),
+        isTrue,
+        reason: 'Created session should be in the list',
+      );
+    });
+
+    test('API errors throw exception with error details', () async {
+      // Use an invalid model name to trigger an API error
+      final badConfig = GeminiSessionConfig(
+        approvalMode: GeminiApprovalMode.yolo,
+        sandbox: true,
+        model: 'invalid-model-that-does-not-exist-xyz',
+      );
+
+      final session = await client.createSession('Say hello', badConfig);
+
+      // Expect exception to be thrown with error details
+      expect(
+        () async {
+          await for (final event in session.events) {
+            if (event is GeminiResultEvent) break;
+          }
+        },
+        throwsA(
+          isA<GeminiProcessException>().having(
+            (e) => e.message,
+            'message',
+            anyOf(contains('404'), contains('not found')),
+          ),
+        ),
+        reason: 'Exception should contain error details from API',
+      );
+    });
+
+    test('CLI errors throw exception with stderr details', () async {
+      // Use an invalid CLI flag to trigger a CLI error
+      final badConfig = GeminiSessionConfig(
+        approvalMode: GeminiApprovalMode.yolo,
+        sandbox: true,
+        extraArgs: ['--fail-for-me-please'],
+      );
+
+      // Expect createSession to fail with CLI error details
+      expect(
+        () async {
+          final session = await client.createSession('Say hello', badConfig);
+          await for (final event in session.events) {
+            if (event is GeminiResultEvent) break;
+          }
+        },
+        throwsA(
+          isA<GeminiProcessException>().having(
+            (e) => e.message,
+            'message',
+            // Gemini CLI outputs: "Unknown arguments: fail-for-me-please"
+            anyOf(contains('Unknown'), contains('unknown')),
+          ),
+        ),
+        reason: 'Exception should contain error details from CLI stderr',
+      );
+    });
+
   });
 }

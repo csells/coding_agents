@@ -31,6 +31,9 @@ class ClaudeSessionConfig {
   /// List of tools to disallow
   final List<String>? disallowedTools;
 
+  /// Extra CLI arguments to pass (for testing or advanced use)
+  final List<String>? extraArgs;
+
   ClaudeSessionConfig({
     this.permissionMode = ClaudePermissionMode.defaultMode,
     this.permissionHandler,
@@ -40,6 +43,7 @@ class ClaudeSessionConfig {
     this.maxTurns,
     this.allowedTools,
     this.disallowedTools,
+    this.extraArgs,
   }) {
     if (permissionMode == ClaudePermissionMode.delegate &&
         permissionHandler == null) {

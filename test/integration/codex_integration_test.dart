@@ -149,7 +149,7 @@ void main() {
     test('can resume session with resumeSession', () async {
       // First turn - create a session
       final session1 = await client.createSession(
-        'Remember this number: 42. Just say OK.',
+        'Hi! My name is Chris!',
         config,
       );
 
@@ -163,7 +163,7 @@ void main() {
       // Second turn - resume session
       final session2 = await client.resumeSession(
         threadId,
-        'What number did I ask you to remember?',
+        'Say my name.',
         config,
       );
 
@@ -185,12 +185,12 @@ void main() {
         if (event is CodexTurnCompletedEvent) break;
       }
 
-      // The response should mention 42
-      final fullResponse = responses.join(' ');
+      // The response should mention Chris
+      final fullResponse = responses.join(' ').toLowerCase();
       expect(
-        fullResponse.contains('42'),
+        fullResponse.contains('chris'),
         isTrue,
-        reason: 'Codex should remember the number from previous turn',
+        reason: 'Codex should remember the name from previous turn',
       );
     });
 
@@ -216,5 +216,94 @@ void main() {
         reason: 'TurnId should match session turnId',
       );
     });
+
+    test('listSessions returns sessions including created session', () async {
+      // Create a session
+      final session = await client.createSession(
+        'Say: "List test"',
+        config,
+      );
+
+      final threadId = session.threadId;
+
+      // Wait for session to complete
+      await for (final event in session.events) {
+        if (event is CodexTurnCompletedEvent) break;
+      }
+
+      // List sessions
+      final sessions = await client.listSessions();
+
+      // Verify our session is in the list
+      expect(
+        sessions,
+        isNotEmpty,
+        reason: 'Should have at least one session',
+      );
+      expect(
+        sessions.any((s) => s.threadId == threadId),
+        isTrue,
+        reason: 'Created session should be in the list',
+      );
+    });
+
+    test('API errors throw exception with error details', () async {
+      // Use an invalid model name to trigger an API error
+      final badConfig = CodexSessionConfig(
+        fullAuto: true,
+        model: 'invalid-model-that-does-not-exist-xyz',
+      );
+
+      final session = await client.createSession('Say hello', badConfig);
+
+      // Expect the exception to include the actual error message
+      expect(
+        () async {
+          await for (final event in session.events) {
+            if (event is CodexTurnCompletedEvent) break;
+          }
+        },
+        throwsA(
+          isA<CodexProcessException>().having(
+            (e) => e.message,
+            'message',
+            // Should contain actual error details from API
+            predicate<String>(
+              (msg) => msg.contains('invalid-model') || msg.contains('400'),
+              'contains error details from Codex API',
+            ),
+          ),
+        ),
+        reason: 'Exception should contain error details from API',
+      );
+    });
+
+    test('CLI errors throw exception with stderr details', () async {
+      // Use an invalid CLI flag to trigger a CLI error
+      final badConfig = CodexSessionConfig(
+        fullAuto: true,
+        extraArgs: ['--fail-for-me-please'],
+      );
+
+      // Expect createSession to fail with CLI error details
+      expect(
+        () async {
+          final session = await client.createSession('Say hello', badConfig);
+          await for (final event in session.events) {
+            if (event is CodexTurnCompletedEvent) break;
+          }
+        },
+        throwsA(
+          isA<CodexProcessException>().having(
+            (e) => e.message,
+            'message',
+            // Codex CLI outputs: "error: unexpected argument '--fail-for-me-please' found"
+            contains('unexpected'),
+          ),
+        ),
+        reason: 'Exception should contain error details from CLI stderr',
+      );
+    });
+
   });
 }
