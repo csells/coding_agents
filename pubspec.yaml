@@ -1,6 +1,6 @@
 name: coding_agents
 description: Dart adapters for CLI coding agents (Claude Code, Codex CLI, Gemini CLI).
-version: 1.0.0
+version: 0.1.0
 
 environment:
   sdk: ^3.10.0
