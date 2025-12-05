@@ -288,5 +288,87 @@ void main() {
       );
     });
 
+    test('getSessionHistory returns all events from session', () async {
+      const testPrompt = 'Say exactly: "History test response"';
+
+      // Create a session
+      final session = await client.createSession(testPrompt, config);
+      final sessionId = session.sessionId;
+
+      // Wait for session to complete
+      await for (final event in session.events) {
+        if (event is GeminiResultEvent) break;
+      }
+
+      // Get session history
+      final history = await client.getSessionHistory(sessionId);
+
+      // Verify history contains expected event types
+      expect(
+        history,
+        isNotEmpty,
+        reason: 'History should not be empty',
+      );
+      expect(
+        history.any((e) => e is GeminiInitEvent),
+        isTrue,
+        reason: 'History should contain init event',
+      );
+      expect(
+        history.any((e) => e is GeminiResultEvent),
+        isTrue,
+        reason: 'History should contain result event',
+      );
+    });
+
+    test('getSessionHistory includes user and assistant messages', () async {
+      const testPrompt = 'Say exactly: "First prompt response"';
+
+      // Create a session
+      final session = await client.createSession(testPrompt, config);
+      final sessionId = session.sessionId;
+
+      // Wait for session to complete
+      await for (final event in session.events) {
+        if (event is GeminiResultEvent) break;
+      }
+
+      // Get session history
+      final history = await client.getSessionHistory(sessionId);
+
+      // Find message events
+      final userMessages = <GeminiMessageEvent>[];
+      final assistantMessages = <GeminiMessageEvent>[];
+      for (final event in history) {
+        if (event is GeminiMessageEvent) {
+          if (event.role == 'user') {
+            userMessages.add(event);
+          } else if (event.role == 'assistant') {
+            assistantMessages.add(event);
+          }
+        }
+      }
+
+      // Verify we have both user and assistant messages
+      expect(
+        userMessages,
+        isNotEmpty,
+        reason: 'History should include user messages',
+      );
+      expect(
+        assistantMessages,
+        isNotEmpty,
+        reason: 'History should include assistant messages',
+      );
+    });
+
+    test('getSessionHistory throws for non-existent session', () async {
+      expect(
+        () => client.getSessionHistory('non-existent-session-id-xyz'),
+        throwsA(isA<GeminiProcessException>()),
+        reason: 'Should throw for non-existent session',
+      );
+    });
+
   });
 }

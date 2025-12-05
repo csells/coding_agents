@@ -315,5 +315,81 @@ void main() {
       );
     });
 
+    test('getSessionHistory returns all events from session', () async {
+      const testPrompt = 'Say exactly: "History test response"';
+
+      // Create a session
+      final session = await client.createSession(testPrompt, config);
+      final sessionId = session.sessionId;
+
+      // Wait for session to complete
+      await for (final event in session.events) {
+        if (event is ClaudeResultEvent) break;
+      }
+
+      // Get session history
+      final history = await client.getSessionHistory(sessionId);
+
+      // Verify history contains events
+      expect(
+        history,
+        isNotEmpty,
+        reason: 'History should not be empty',
+      );
+      // History should contain at least some message-related events
+      // The exact set of events stored to disk may differ from streamed events
+      expect(
+        history.any((e) =>
+            e is ClaudeUserEvent ||
+            e is ClaudeAssistantEvent ||
+            e is ClaudeSystemEvent),
+        isTrue,
+        reason: 'History should contain message-related events',
+      );
+    });
+
+    test('getSessionHistory includes user prompt as text block', () async {
+      const testPrompt = 'Say exactly: "First prompt test"';
+
+      // Create a session
+      final session = await client.createSession(testPrompt, config);
+      final sessionId = session.sessionId;
+
+      // Wait for session to complete
+      await for (final event in session.events) {
+        if (event is ClaudeResultEvent) break;
+      }
+
+      // Get session history
+      final history = await client.getSessionHistory(sessionId);
+
+      // Find user events with text content
+      final userTexts = <String>[];
+      for (final event in history) {
+        if (event is ClaudeUserEvent) {
+          for (final block in event.content) {
+            if (block is ClaudeTextBlock) {
+              userTexts.add(block.text);
+            }
+          }
+        }
+      }
+
+      // Verify we can find the original prompt
+      expect(
+        userTexts.any((text) => text.contains('First prompt test')),
+        isTrue,
+        reason: 'History should include user prompt as text block',
+      );
+    });
+
+    test('getSessionHistory throws for non-existent session', () async {
+      expect(
+        () => client.getSessionHistory('non-existent-session-id-xyz'),
+        throwsA(isA<ClaudeProcessException>()),
+        reason: 'Should throw for non-existent session',
+      );
+    });
+
   });
 }

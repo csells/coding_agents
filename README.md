@@ -1,6 +1,7 @@
 # coding_agents
 
-Dart adapters for CLI-based coding agents: Claude Code, Codex CLI, and Gemini CLI.
+Dart adapters for CLI-based coding agents: Claude Code, Codex CLI, and Gemini
+CLI.
 
 This library provides programmatic control over coding agents through their CLI
 interfaces, enabling multi-turn conversations, streaming events, and session
@@ -8,8 +9,8 @@ management from Dart applications.
 
 ## Features
 
-- **Claude Code Adapter**: Long-lived bidirectional JSONL sessions with streaming
-  events, multi-turn conversations, and session resumption
+- **Claude Code Adapter**: Long-lived bidirectional JSONL sessions with
+  streaming events, multi-turn conversations, and session resumption
 - **Codex CLI Adapter**: Process-per-turn model with thread-based session
   management and full-auto mode support
 - **Gemini CLI Adapter**: Process-per-turn model with sandbox mode and session
@@ -150,14 +151,86 @@ final targetSession = sessions.firstWhere(
 );
 ```
 
+### Retrieving Session History
+
+All adapters support fetching the full event history for a session:
+
+```dart
+// Get all events from a session
+final history = await client.getSessionHistory(sessionId);
+
+for (final event in history) {
+  if (event is ClaudeUserEvent) {
+    print('User message');
+  } else if (event is ClaudeAssistantEvent) {
+    for (final block in event.content) {
+      if (block is ClaudeTextBlock) {
+        print('Assistant: ${block.text}');
+      }
+    }
+  }
+}
+```
+
 ## Examples
 
-See the `example/` folder for complete examples:
+### Programmatic Examples
+
+See the `example/` folder for programmatic usage examples:
 
 ```bash
 dart run example/claude_code_cli.dart
 dart run example/codex_cli.dart
 dart run example/gemini_cli.dart
+```
+
+### Interactive CLI Examples
+
+The `example/simple_cli/` folder contains interactive CLI wrappers for each
+adapter:
+
+```bash
+# Claude Code CLI
+dart run example/simple_cli/claude_cli.dart
+
+# Codex CLI
+dart run example/simple_cli/codex_cli.dart
+
+# Gemini CLI
+dart run example/simple_cli/gemini_cli.dart
+```
+
+**CLI Options:**
+
+| Flag                  | Short | Description                                       |
+| --------------------- | ----- | ------------------------------------------------- |
+| (none)                |       | Interactive multi-turn REPL                       |
+| `--project-directory` | `-d`  | Working directory (default: cwd)                  |
+| `--prompt`            | `-p`  | Execute a single prompt and exit                  |
+| `--list-sessions`     | `-s`  | List sessions with ID, first prompt, last updated |
+| `--resume-session`    | `-r`  | Resume a session by ID                            |
+| `--yolo`              | `-y`  | Permissive mode (bypass approvals)                |
+
+**Usage Examples:**
+
+```bash
+# Interactive REPL
+dart run example/simple_cli/claude_cli.dart
+
+# One-shot prompt
+dart run example/simple_cli/claude_cli.dart -p "What is 2+2?"
+
+# List sessions
+dart run example/simple_cli/claude_cli.dart -s
+
+# Resume session (shows history, then enters REPL)
+dart run example/simple_cli/claude_cli.dart -r <session-id>
+
+# One-shot in resumed session
+dart run example/simple_cli/claude_cli.dart -r <session-id> -p "Continue"
+
+# Different project directory with yolo mode
+dart run example/simple_cli/claude_cli.dart -d /path/to/project -y
 ```
 
 ## Architecture
@@ -177,7 +250,8 @@ Each adapter follows the pattern:
 Client (per working directory)
   ├── createSession(prompt, config) → Session
   ├── resumeSession(sessionId, prompt, config) → Session
-  └── listSessions() → List<SessionInfo>
+  ├── listSessions() → List<SessionInfo>
+  └── getSessionHistory(sessionId) → List<Event>
 
 Session
   ├── sessionId: String
@@ -187,9 +261,8 @@ Session
 
 ## Specifications
 
-- [CLI Adapter Design](specs/cli-adapter-design.md) - Detailed API design
-- [CLI Streaming Protocol](specs/cli-streaming-protocol.md) - JSONL streaming protocols
-- [Best Practices](specs/best-practices.md) - Coding guidelines
+- [CLI Streaming Protocol](specs/cli-streaming-protocol.md) - JSONL streaming
+  protocols
 
 ## Development
 

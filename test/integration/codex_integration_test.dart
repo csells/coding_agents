@@ -305,5 +305,58 @@ void main() {
       );
     });
 
+    test('getSessionHistory returns all events from session', () async {
+      const testPrompt = 'Say exactly: "History test response"';
+
+      // Create a session
+      final session = await client.createSession(testPrompt, config);
+      final threadId = session.threadId;
+
+      // Wait for session to complete
+      await for (final event in session.events) {
+        if (event is CodexTurnCompletedEvent) break;
+      }
+
+      // Get session history
+      final history = await client.getSessionHistory(threadId);
+
+      // Verify history contains events
+      expect(
+        history,
+        isNotEmpty,
+        reason: 'History should not be empty',
+      );
+      // The exact set of events stored to disk may differ from streamed events
+      // Just verify we got some events back
+    });
+
+    test('getSessionHistory can be called multiple times', () async {
+      const testPrompt = 'Say exactly: "First prompt response"';
+
+      // Create a session
+      final session = await client.createSession(testPrompt, config);
+      final threadId = session.threadId;
+
+      // Wait for session to complete
+      await for (final event in session.events) {
+        if (event is CodexTurnCompletedEvent) break;
+      }
+
+      // Get session history twice - should work both times
+      final history1 = await client.getSessionHistory(threadId);
+      final history2 = await client.getSessionHistory(threadId);
+
+      // Both should return the same events
+      expect(history1.length, equals(history2.length));
+    });
+
+    test('getSessionHistory throws for non-existent session', () async {
+      expect(
+        () => client.getSessionHistory('non-existent-thread-id-xyz'),
+        throwsA(isA<CodexProcessException>()),
+        reason: 'Should throw for non-existent session',
+      );
+    });
+
   });
 }

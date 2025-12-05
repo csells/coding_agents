@@ -54,6 +54,86 @@ class CodexCliAdapter {
     return sessions;
   }
 
+  /// Get the full history of events for a session
+  ///
+  /// Parses the session JSONL file and returns all events in order.
+  /// Throws [CodexProcessException] if the session file is not found.
+  Future<List<CodexEvent>> getSessionHistory(String threadId) async {
+    final sessionsDir = Directory(
+      '${Platform.environment['HOME']}/.codex/sessions',
+    );
+
+    if (!await sessionsDir.exists()) {
+      throw CodexProcessException('Session not found: $threadId');
+    }
+
+    // Find the session file containing this threadId
+    File? sessionFile;
+    await for (final entity in sessionsDir.list(recursive: true)) {
+      if (entity is! File || !entity.path.endsWith('.jsonl')) continue;
+
+      // Check if this file contains our threadId
+      final firstLines = await entity
+          .openRead()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .take(10)
+          .toList();
+
+      for (final line in firstLines) {
+        if (!line.trim().startsWith('{')) continue;
+        final json = jsonDecode(line) as Map<String, dynamic>;
+
+        // Check session_meta event
+        if (json['type'] == 'session_meta') {
+          final payload = json['payload'] as Map<String, dynamic>?;
+          if (payload?['id'] == threadId) {
+            sessionFile = entity;
+            break;
+          }
+        }
+
+        // Check thread.started event
+        if (json['type'] == 'thread.started' &&
+            json['thread_id'] == threadId) {
+          sessionFile = entity;
+          break;
+        }
+      }
+
+      if (sessionFile != null) break;
+    }
+
+    if (sessionFile == null) {
+      throw CodexProcessException('Session not found: $threadId');
+    }
+
+    final events = <CodexEvent>[];
+    var turnId = 0;
+
+    final lines = await sessionFile
+        .openRead()
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .toList();
+
+    for (final line in lines) {
+      if (!line.trim().startsWith('{')) continue;
+
+      final json = jsonDecode(line) as Map<String, dynamic>;
+      final event = CodexEvent.fromJson(json, threadId, turnId);
+
+      // Increment turn ID on turn.completed events
+      if (event is CodexTurnCompletedEvent) {
+        turnId++;
+      }
+
+      events.add(event);
+    }
+
+    return events;
+  }
+
   Future<CodexSessionInfo?> _parseSessionFile(File file) async {
     final lines = await file
         .openRead()

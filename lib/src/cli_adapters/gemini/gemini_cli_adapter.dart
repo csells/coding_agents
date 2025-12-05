@@ -74,6 +74,103 @@ class GeminiCliAdapter {
     return sessions;
   }
 
+  /// Get the full history of events for a session
+  ///
+  /// Parses the session JSON file and returns all events in order.
+  /// Gemini stores sessions as JSON files with a messages array.
+  /// Throws [GeminiProcessException] if the session file is not found.
+  Future<List<GeminiEvent>> getSessionHistory(String sessionId) async {
+    final geminiDir = Directory(
+      '${Platform.environment['HOME']}/.gemini/tmp',
+    );
+
+    if (!await geminiDir.exists()) {
+      throw GeminiProcessException('Session not found: $sessionId');
+    }
+
+    // Find the session file by searching all project directories
+    File? sessionFile;
+    await for (final projectDir in geminiDir.list()) {
+      if (projectDir is! Directory) continue;
+
+      final chatsDir = Directory('${projectDir.path}/chats');
+      if (!await chatsDir.exists()) continue;
+
+      // Check all .json files in chats directory
+      await for (final file in chatsDir.list()) {
+        if (file is! File || !file.path.endsWith('.json')) continue;
+
+        // Read file and check sessionId
+        final content = await file.readAsString();
+        final json = jsonDecode(content) as Map<String, dynamic>;
+        if (json['sessionId'] == sessionId) {
+          sessionFile = file;
+          break;
+        }
+      }
+
+      if (sessionFile != null) break;
+    }
+
+    if (sessionFile == null) {
+      throw GeminiProcessException('Session not found: $sessionId');
+    }
+
+    // Parse the JSON file
+    final content = await sessionFile.readAsString();
+    final json = jsonDecode(content) as Map<String, dynamic>;
+    final messages = json['messages'] as List<dynamic>? ?? [];
+
+    final events = <GeminiEvent>[];
+    var turnId = 0;
+
+    // Add init event
+    events.add(GeminiInitEvent(
+      sessionId: sessionId,
+      turnId: turnId,
+      model: '',
+    ));
+
+    // Convert messages to events
+    for (final msg in messages) {
+      final msgMap = msg as Map<String, dynamic>;
+      final type = msgMap['type'] as String?;
+      final msgContent = msgMap['content'] as String? ?? '';
+      final timestamp = DateTime.tryParse(msgMap['timestamp'] as String? ?? '');
+
+      if (type == 'user') {
+        events.add(GeminiMessageEvent(
+          sessionId: sessionId,
+          turnId: turnId,
+          role: 'user',
+          content: msgContent,
+          delta: false,
+          timestamp: timestamp,
+        ));
+      } else if (type == 'gemini') {
+        events.add(GeminiMessageEvent(
+          sessionId: sessionId,
+          turnId: turnId,
+          role: 'assistant',
+          content: msgContent,
+          delta: false,
+          timestamp: timestamp,
+        ));
+
+        // Add a result event after assistant message to mark turn complete
+        events.add(GeminiResultEvent(
+          sessionId: sessionId,
+          turnId: turnId,
+          status: 'success',
+          timestamp: timestamp,
+        ));
+        turnId++;
+      }
+    }
+
+    return events;
+  }
+
   /// Parse relative time strings like "1 hour ago", "Just now", "2 days ago"
   DateTime _parseRelativeTime(String timeAgo, DateTime now) {
     final lower = timeAgo.toLowerCase();

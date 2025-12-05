@@ -279,6 +279,46 @@ class ClaudeCodeCliAdapter {
     return jsonEncode(message);
   }
 
+  /// Get the full history of events for a session
+  ///
+  /// Parses the session JSONL file and returns all events in order.
+  /// Throws [ClaudeProcessException] if the session file is not found.
+  Future<List<ClaudeEvent>> getSessionHistory(String sessionId) async {
+    final encodedCwd = cwd.replaceAll('/', '-').replaceAll('_', '-');
+    final sessionFile = File(
+      '${Platform.environment['HOME']}/.claude/projects/$encodedCwd/$sessionId.jsonl',
+    );
+
+    if (!await sessionFile.exists()) {
+      throw ClaudeProcessException('Session file not found: $sessionId');
+    }
+
+    final events = <ClaudeEvent>[];
+    var turnId = 0;
+
+    final lines = await sessionFile
+        .openRead()
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .toList();
+
+    for (final line in lines) {
+      if (!line.trim().startsWith('{')) continue;
+
+      final json = jsonDecode(line) as Map<String, dynamic>;
+      final event = ClaudeEvent.fromJson(json, turnId);
+
+      // Increment turn ID on result events
+      if (event is ClaudeResultEvent) {
+        turnId++;
+      }
+
+      events.add(event);
+    }
+
+    return events;
+  }
+
   Future<ClaudeSessionInfo?> _parseSessionFile(File file) async {
     // Read first few lines to extract metadata
     final lines = await file

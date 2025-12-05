@@ -1192,6 +1192,63 @@ gemini --list-sessions       # List all sessions
 ~/.gemini/tmp/<project_hash>/checkpoints/ # Git checkpoints
 ```
 
+**Session file format:**
+
+Unlike the streaming JSONL output, Gemini stores session history as a single JSON
+file with a `messages` array. Session files are named
+`session-YYYY-MM-DDTHH-MM-<short_id>.json`:
+
+```json
+{
+  "sessionId": "abc123-def456-7890",
+  "projectHash": "sha256hash...",
+  "startTime": "2025-12-03T10:00:00.000Z",
+  "lastUpdated": "2025-12-03T10:05:00.000Z",
+  "messages": [
+    {
+      "id": "msg-001",
+      "timestamp": "2025-12-03T10:00:01.000Z",
+      "type": "user",
+      "content": "Analyze the auth module"
+    },
+    {
+      "id": "msg-002",
+      "timestamp": "2025-12-03T10:00:05.000Z",
+      "type": "gemini",
+      "content": "I'll analyze the authentication module...",
+      "thoughts": [
+        {
+          "subject": "Analysis Strategy",
+          "description": "Starting with file structure review...",
+          "timestamp": "2025-12-03T10:00:03.000Z"
+        }
+      ],
+      "tokens": {
+        "input": 100,
+        "output": 250,
+        "cached": 50,
+        "thoughts": 100,
+        "tool": 0,
+        "total": 500
+      },
+      "model": "gemini-2.5-pro"
+    }
+  ]
+}
+```
+
+**Message types in stored sessions:**
+
+| Type     | Description                | Key Fields                             |
+| -------- | -------------------------- | -------------------------------------- |
+| `user`   | User prompt                | `content`                              |
+| `gemini` | Assistant response         | `content`, `thoughts`, `tokens`        |
+
+**Note:** The stored session format differs from the streaming JSONL format. When
+reading session history, the `messages` array must be converted to event types:
+- `type: "user"` → `GeminiMessageEvent` with `role: "user"`
+- `type: "gemini"` → `GeminiMessageEvent` with `role: "assistant"`
+
 **Checkpointing (settings.json):**
 ```json
 {

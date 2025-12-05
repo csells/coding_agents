@@ -103,10 +103,19 @@ class ClaudeUserEvent extends ClaudeEvent {
 
   factory ClaudeUserEvent.fromJson(Map<String, dynamic> json, int turnId) {
     final message = json['message'] as Map<String, dynamic>?;
-    final contentList = (message?['content'] as List<dynamic>?)
-            ?.map((e) => ClaudeContentBlock.fromJson(e as Map<String, dynamic>))
-            .toList() ??
-        [];
+    final rawContent = message?['content'];
+
+    // Content can be a List of blocks or a simple String
+    List<ClaudeContentBlock> contentList;
+    if (rawContent is List) {
+      contentList = rawContent
+          .map((e) => ClaudeContentBlock.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } else if (rawContent is String) {
+      contentList = [ClaudeTextBlock(text: rawContent)];
+    } else {
+      contentList = [];
+    }
 
     return ClaudeUserEvent(
       sessionId: json['session_id'] as String? ?? '',
