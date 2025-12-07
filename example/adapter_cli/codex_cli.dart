@@ -244,13 +244,14 @@ Future<CodexApprovalResponse> _approvalHandler(
   final input = stdin.readLineSync()?.trim().toLowerCase() ?? 'n';
 
   return switch (input) {
-    'y' || 'yes' => CodexApprovalResponse(decision: CodexApprovalDecision.allow),
+    'y' ||
+    'yes' => CodexApprovalResponse(decision: CodexApprovalDecision.allow),
     'a' || 'always' => CodexApprovalResponse(
-        decision: CodexApprovalDecision.allowAlways,
-      ),
+      decision: CodexApprovalDecision.allowAlways,
+    ),
     'd' || 'never' => CodexApprovalResponse(
-        decision: CodexApprovalDecision.denyAlways,
-      ),
+      decision: CodexApprovalDecision.denyAlways,
+    ),
     _ => CodexApprovalResponse(decision: CodexApprovalDecision.deny),
   };
 }
@@ -320,7 +321,7 @@ Future<void> _repl(
     }
 
     stdout.write('Codex: ');
-    await for (final event in activeSession!.events) {
+    await for (final event in activeSession.events) {
       switch (event) {
         case CodexItemCompletedEvent():
           final item = event.item;
