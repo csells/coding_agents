@@ -180,7 +180,12 @@ Future<void> _oneShot(
   String projectDir, {
   String? threadId,
 }) async {
-  final config = CodexSessionConfig(fullAuto: yolo);
+  // Create config with approval handler for interactive mode
+  final config = CodexSessionConfig(
+    fullAuto: yolo,
+    // When not in yolo mode, use an approval callback to prompt user
+    approvalHandler: yolo ? null : _approvalHandler,
+  );
 
   final session = threadId != null
       ? await client.resumeSession(
@@ -204,6 +209,9 @@ Future<void> _oneShot(
         } else if (item is CodexToolCallItem) {
           print('\n[Tool: ${item.name}]');
         }
+      case CodexApprovalRequiredEvent():
+        // This will be handled by the approvalHandler callback
+        print('\n[Approval request: ${event.request.description}]');
       case CodexTurnCompletedEvent():
         print('');
         break;
@@ -216,17 +224,49 @@ Future<void> _oneShot(
   }
 }
 
+/// Approval handler callback for interactive approval prompts
+Future<CodexApprovalResponse> _approvalHandler(
+  CodexApprovalRequest request,
+) async {
+  print('');
+  print('=== Approval Required ===');
+  print('Action: ${request.actionType}');
+  print('Description: ${request.description}');
+  if (request.command != null) {
+    print('Command: ${request.command}');
+  }
+  if (request.filePath != null) {
+    print('File: ${request.filePath}');
+  }
+  print('');
+  stdout.write('Allow? [y/n/a(always)/d(never)]: ');
+
+  final input = stdin.readLineSync()?.trim().toLowerCase() ?? 'n';
+
+  return switch (input) {
+    'y' || 'yes' => CodexApprovalResponse(decision: CodexApprovalDecision.allow),
+    'a' || 'always' => CodexApprovalResponse(
+        decision: CodexApprovalDecision.allowAlways,
+      ),
+    'd' || 'never' => CodexApprovalResponse(
+        decision: CodexApprovalDecision.denyAlways,
+      ),
+    _ => CodexApprovalResponse(decision: CodexApprovalDecision.deny),
+  };
+}
+
 Future<void> _repl(
   CodexCliAdapter client,
   bool yolo,
   String projectDir, {
   String? threadId,
 }) async {
-  print('Codex CLI');
+  print('Codex CLI (app-server mode)');
   print('');
   _printReplHelp();
 
   String? currentThreadId = threadId;
+  CodexSession? activeSession;
 
   while (true) {
     stdout.write('You: ');
@@ -234,12 +274,14 @@ Future<void> _repl(
 
     if (input == null) {
       print('Goodbye!');
+      await activeSession?.cancel();
       break;
     }
 
     final trimmed = input.trim().toLowerCase();
     if (trimmed == '/exit' || trimmed == '/quit') {
       print('Goodbye!');
+      await activeSession?.cancel();
       break;
     }
 
@@ -250,25 +292,35 @@ Future<void> _repl(
 
     if (input.trim().isEmpty) continue;
 
-    final config = CodexSessionConfig(fullAuto: yolo);
+    // Create config with approval handler for interactive mode
+    final config = CodexSessionConfig(
+      fullAuto: yolo,
+      approvalHandler: yolo ? null : _approvalHandler,
+    );
 
-    final session = currentThreadId != null
-        ? await client.resumeSession(
-            currentThreadId,
-            input,
-            config,
-            projectDirectory: projectDir,
-          )
-        : await client.createSession(
-            input,
-            config,
-            projectDirectory: projectDir,
-          );
+    // If we have an active session, use send() for multi-turn
+    // Otherwise create a new session
+    if (activeSession != null && currentThreadId != null) {
+      await activeSession.send(input);
+    } else {
+      activeSession = currentThreadId != null
+          ? await client.resumeSession(
+              currentThreadId,
+              input,
+              config,
+              projectDirectory: projectDir,
+            )
+          : await client.createSession(
+              input,
+              config,
+              projectDirectory: projectDir,
+            );
 
-    currentThreadId = session.threadId;
+      currentThreadId = activeSession.threadId;
+    }
 
     stdout.write('Codex: ');
-    await for (final event in session.events) {
+    await for (final event in activeSession!.events) {
       switch (event) {
         case CodexItemCompletedEvent():
           final item = event.item;
@@ -277,6 +329,8 @@ Future<void> _repl(
           } else if (item is CodexToolCallItem) {
             print('\n[Tool: ${item.name}]');
           }
+        case CodexApprovalRequiredEvent():
+          print('\n[Approval request: ${event.request.description}]');
         case CodexTurnCompletedEvent():
           print('');
           print('');

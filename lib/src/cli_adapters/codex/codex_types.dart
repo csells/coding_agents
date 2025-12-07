@@ -8,6 +8,21 @@ enum CodexApprovalPolicy { onRequest, untrusted, onFailure, never }
 /// Sandbox mode for Codex CLI
 enum CodexSandboxMode { readOnly, workspaceWrite, dangerFullAccess }
 
+/// Permission behavior response values for approval decisions
+enum CodexApprovalDecision {
+  /// Allow this specific action
+  allow,
+
+  /// Deny this specific action
+  deny,
+
+  /// Allow this action and all future similar actions
+  allowAlways,
+
+  /// Deny this action and all future similar actions
+  denyAlways,
+}
+
 /// Item types in Codex output
 enum CodexItemType {
   agentMessage,
@@ -282,4 +297,68 @@ class CodexUnknownItem implements CodexItem {
   CodexItemType get type => CodexItemType.error;
 
   CodexUnknownItem({required this.data});
+}
+
+/// Approval request from Codex app-server
+///
+/// When the app-server needs approval for a tool execution, it emits
+/// an approval item and waits for the client to send a decision.
+@JsonSerializable()
+class CodexApprovalRequest {
+  /// Unique ID for this approval request
+  final String id;
+
+  /// Turn ID this approval is associated with
+  final String turnId;
+
+  /// Type of action requiring approval (e.g., 'shell', 'file_write')
+  final String actionType;
+
+  /// Human-readable description of the action
+  final String description;
+
+  /// Tool name (e.g., 'bash', 'write')
+  final String? toolName;
+
+  /// Tool input/arguments
+  final Map<String, dynamic>? toolInput;
+
+  /// Command to be executed (for shell actions)
+  final String? command;
+
+  /// File path (for file operations)
+  final String? filePath;
+
+  CodexApprovalRequest({
+    required this.id,
+    required this.turnId,
+    required this.actionType,
+    required this.description,
+    this.toolName,
+    this.toolInput,
+    this.command,
+    this.filePath,
+  });
+
+  factory CodexApprovalRequest.fromJson(Map<String, dynamic> json) =>
+      _$CodexApprovalRequestFromJson(json);
+
+  Map<String, dynamic> toJson() => _$CodexApprovalRequestToJson(this);
+}
+
+/// Response to an approval request
+@JsonSerializable()
+class CodexApprovalResponse {
+  /// The decision for this approval
+  final CodexApprovalDecision decision;
+
+  /// Optional message to include with the response
+  final String? message;
+
+  CodexApprovalResponse({required this.decision, this.message});
+
+  factory CodexApprovalResponse.fromJson(Map<String, dynamic> json) =>
+      _$CodexApprovalResponseFromJson(json);
+
+  Map<String, dynamic> toJson() => _$CodexApprovalResponseToJson(this);
 }

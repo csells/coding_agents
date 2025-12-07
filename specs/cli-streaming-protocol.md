@@ -37,16 +37,16 @@ the native streaming protocols.
 All three CLIs support **multi-turn conversations with session persistence**,
 but use different architectural patterns:
 
-| CLI             | Process Model                    | Session Persistence | Multi-Turn Pattern                             | Session Storage                  |
-| --------------- | -------------------------------- | ------------------- | ---------------------------------------------- | -------------------------------- |
-| **Claude Code** | Long-lived (bidirectional JSONL) | Disk                | Send messages to same process via stdin        | `~/.claude/sessions/`            |
-| **Codex CLI**   | Process-per-turn                 | Disk                | Spawn new process with `resume <thread_id>`    | `~/.codex/sessions/`             |
-| **Gemini CLI**  | Process-per-turn                 | Disk                | Spawn new process with `--resume <session_id>` | `~/.gemini/tmp/<project>/chats/` |
+| CLI             | Process Model                         | Session Persistence | Multi-Turn Pattern                             | Session Storage                  |
+| --------------- | ------------------------------------- | ------------------- | ---------------------------------------------- | -------------------------------- |
+| **Claude Code** | Long-lived (bidirectional JSONL)      | Disk                | Send messages to same process via stdin        | `~/.claude/sessions/`            |
+| **Codex CLI**   | Long-lived app-server (JSON-RPC/JSONL)| Disk                | JSON-RPC createTurn to same process            | `~/.codex/sessions/`             |
+| **Gemini CLI**  | Process-per-turn                      | Disk                | Spawn new process with `--resume <session_id>` | `~/.gemini/tmp/<project>/chats/` |
 
-**Key insight:** Codex and Gemini use the **same architectural pattern** - spawn
-a new CLI process for each user turn, with session state persisted to disk and
-restored via resume flags. Claude Code is unique in supporting true
-bidirectional JSONL streaming within a single long-lived process.
+**Key insight:** Claude Code and Codex app-server both support **long-lived
+bidirectional communication** within a single process. Codex uses JSON-RPC over
+stdio for IDE integration. Gemini uses a process-per-turn model with disk-based
+session restoration.
 
 ### Common Architecture
 
@@ -698,25 +698,94 @@ query.accountInfo();                  // Get authenticated account info
 
 ## 4. Codex CLI Protocol
 
-### 4.1 Invocation
+### 4.1 Execution Modes
+
+Codex CLI supports two execution modes:
+
+1. **App-Server Mode** (recommended): Long-lived JSON-RPC process with
+   bidirectional communication, interactive approval handling, and multi-turn
+   within a single process.
+
+2. **Exec Mode** (legacy): Process-per-turn with JSONL streaming output,
+   auto-approval only.
+
+### 4.2 App-Server Mode (Recommended)
+
+The app-server provides a JSON-RPC interface over stdio for IDE integration and
+programmatic access.
+
+**Starting the app-server:**
+```bash
+codex app-server [options]
+```
+
+**App-Server Arguments:**
+
+| Argument                                   | Short | Description                       |
+| ------------------------------------------ | ----- | --------------------------------- |
+| `--full-auto`                              |       | Auto-approve with workspace sandbox |
+| `--dangerously-bypass-approvals-and-sandbox` | `--yolo` | Full access, no sandboxing    |
+| `--model <name>`                           | `-m`  | Model selection                   |
+| `-a <policy>`                              |       | Approval policy                   |
+| `-s <mode>`                                |       | Sandbox mode                      |
+| `--search`                                 |       | Enable web search                 |
+| `-c <key=value>`                           |       | Config overrides                  |
+
+**JSON-RPC Communication:**
+
+Input (stdin):
+```json
+{"jsonrpc":"2.0","id":1,"method":"createThread","params":{"message":"Your prompt","cwd":"/path/to/project"}}
+```
+
+Output (stdout):
+- JSON-RPC responses for requests
+- JSONL event notifications (thread.started, item.*, turn.*, etc.)
+
+**Multi-turn within single process:**
+```json
+// Create initial thread
+{"jsonrpc":"2.0","id":1,"method":"createThread","params":{"message":"Analyze auth","cwd":"/project"}}
+// ... events stream ...
+
+// Continue conversation
+{"jsonrpc":"2.0","id":2,"method":"createTurn","params":{"thread_id":"sess_abc123","message":"Now refactor it"}}
+```
+
+**Approval Handling:**
+
+When approval is required, the server emits an `approval.required` event and
+waits for the client to respond:
+
+```json
+// Server notification
+{"type":"approval.required","id":"approval_1","turn_id":"turn_1","action_type":"shell","description":"Run: npm test","command":"npm test"}
+
+// Client response
+{"jsonrpc":"2.0","id":3,"method":"respondToApproval","params":{"approval_id":"approval_1","decision":"allow"}}
+```
+
+**Decision values:** `allow`, `deny`, `allow_always`, `deny_always`
+
+### 4.3 Exec Mode (Legacy)
 
 **Basic headless execution:**
 ```bash
-codex --json "Your prompt here"
+codex exec --json "Your prompt here"
 ```
 
 **Resume session:**
 ```bash
-codex resume --last "Continue with..."     # Resume most recent
-codex resume <thread_id> "Continue with..."  # Resume specific
+codex exec --json resume --last "Continue with..."     # Resume most recent
+codex exec --json resume <thread_id> "Continue with..."  # Resume specific
 ```
 
 **Full auto mode:**
 ```bash
-codex --json --full-auto "Your prompt"
+codex exec --json --full-auto "Your prompt"
 ```
 
-### 4.2 CLI Arguments
+### 4.4 Exec Mode CLI Arguments
 
 | Argument                                   | Short | Description                       |
 | ------------------------------------------ | ----- | --------------------------------- |
@@ -734,38 +803,32 @@ codex --json --full-auto "Your prompt"
 | `resume`                                   |       | Resume session subcommand         |
 | `--last`                                   |       | Resume most recent session        |
 
-### 4.3 Input Format (stdin)
+### 4.5 Exec Mode Input Format (stdin)
 
-Codex CLI does **NOT** support continuous JSONL input streaming. Each invocation
-processes a single prompt.
+Exec mode does **NOT** support continuous JSONL input streaming. Each invocation
+processes a single prompt. Approvals are auto-rejected.
 
 **Input mechanism:**
 - Prompt is passed as a command-line argument
-- For multi-turn, spawn a new process with `codex resume <thread_id>`
-
-**Single-turn flow:**
-```bash
-codex --json "Your prompt here"
-```
+- For multi-turn, spawn a new process with `codex exec resume <thread_id>`
 
 **Multi-turn flow (process-per-turn):**
 ```bash
 # Turn 1: Initial prompt
-codex --json "Analyze the auth module"
+codex exec --json "Analyze the auth module"
 # Output includes thread_id in thread.started event
 
 # Turn 2: Resume with follow-up
-codex resume <thread_id> "Now refactor it"
+codex exec --json resume <thread_id> "Now refactor it"
 
 # Turn 3: Continue
-codex resume <thread_id> "Add tests"
+codex exec --json resume <thread_id> "Add tests"
 ```
 
-**Key difference from Claude Code:** Codex requires a new process for each turn.
-The session state is persisted to disk (`~/.codex/sessions/`) and restored via
-`resume` subcommand.
+**Key difference from App-Server:** Exec mode requires a new process for each
+turn and does not support interactive approvals.
 
-### 4.4 Event Types
+### 4.6 Event Types
 
 ```typescript
 type CodexEventType =
@@ -783,7 +846,7 @@ type CodexEventType =
   | "error"
 ```
 
-### 4.4 Item Types
+### 4.7 Item Types
 
 ```typescript
 type CodexItemType =
@@ -811,7 +874,7 @@ type CodexFileChangeKind =
   | "update"  // File modified
 ```
 
-### 4.5 Event Schemas
+### 4.8 Event Schemas
 
 All item events include a full `item` object with an `id` field for correlation.
 
@@ -1052,7 +1115,7 @@ Internal chain-of-thought reasoning (visible in output):
 }
 ```
 
-### 4.6 Complete Event Flow Example
+### 4.9 Complete Event Flow Example
 
 ```jsonl
 {"type":"thread.started","thread_id":"sess_abc123"}
@@ -1071,7 +1134,7 @@ Internal chain-of-thought reasoning (visible in output):
 {"type":"turn.completed","usage":{"input_tokens":1250,"cached_input_tokens":500,"output_tokens":487}}
 ```
 
-### 4.7 Permission Control
+### 4.10 Permission Control
 
 **Approval Policies:**
 
@@ -1114,7 +1177,7 @@ For fully headless operation, use `--full-auto` to skip all permission prompts.
 For security-conscious automation, use sandbox modes to restrict capabilities
 instead of relying on runtime approval.
 
-### 4.8 Session Storage
+### 4.11 Session Storage
 
 **Location:**
 ```

@@ -17,10 +17,14 @@ class CodexProcessException implements Exception {
   String toString() => 'CodexProcessException: $message';
 }
 
-/// Client for interacting with Codex CLI
+/// Client for interacting with Codex CLI via the app-server
+///
+/// Uses the `codex app-server` subcommand for long-lived JSON-RPC
+/// communication, enabling:
+/// - Multi-turn conversations within a single process
+/// - Interactive approval handling via callbacks
+/// - Bidirectional streaming
 class CodexCliAdapter {
-  int _turnCounter = 0;
-
   CodexCliAdapter();
 
   /// List all sessions for a project directory
@@ -210,21 +214,22 @@ class CodexCliAdapter {
 
   /// Create a new Codex session with the given prompt
   ///
-  /// Spawns a Codex process for the initial turn.
+  /// Spawns the Codex app-server for long-lived JSON-RPC communication.
   /// Returns a [CodexSession] that provides access to the event stream.
   Future<CodexSession> createSession(
     String prompt,
     CodexSessionConfig config, {
     required String projectDirectory,
   }) async {
-    final args = buildInitialArgs(prompt, config);
-    final turnId = _turnCounter++;
+    final args = buildAppServerArgs(config);
 
     final process = await Process.start(
       'codex',
       args,
       workingDirectory: projectDirectory,
+      environment: config.environment,
     );
+
     final eventController = StreamController<CodexEvent>();
     final bufferedEvents = <CodexEvent>[];
     final stderrBuffer = StringBuffer();
@@ -233,40 +238,59 @@ class CodexCliAdapter {
     final threadIdCompleter = Completer<String>();
     var isSubscribed = false;
     String threadId = '';
+    CodexSession? session;
 
     // Capture stderr for error reporting
     process.stderr.transform(utf8.decoder).listen((data) {
       stderrBuffer.write(data);
     });
 
-    // Parse stdout JSONL
+    // Parse stdout JSONL (JSON-RPC messages and notifications)
     process.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
-          final event = parseJsonLine(line, threadId, turnId);
-          if (event == null) return;
+      final parsed = _parseJsonLine(line, threadId);
+      if (parsed == null) return;
 
-          // Capture thread ID from thread.started event
-          if (event is CodexThreadStartedEvent) {
-            threadId = event.threadId;
-            if (!threadIdCompleter.isCompleted) {
-              threadIdCompleter.complete(event.threadId);
-            }
-          }
+      // Handle JSON-RPC responses
+      if (parsed['jsonrpc'] == '2.0' && parsed.containsKey('id')) {
+        session?.handleRpcResponse(parsed);
+        return;
+      }
 
-          // Capture error messages from error events
-          if (event is CodexErrorEvent) {
-            lastErrorMessage = event.message;
-          }
+      // Convert to event
+      final event = CodexEvent.fromJson(
+        parsed,
+        threadId,
+        session?.currentTurnId ?? 0,
+      );
 
-          // Buffer events until first subscription, then emit directly
-          if (isSubscribed) {
-            eventController.add(event);
-          } else {
-            bufferedEvents.add(event);
-          }
-        });
+      // Capture thread ID from thread.started event
+      if (event is CodexThreadStartedEvent) {
+        threadId = event.threadId;
+        if (!threadIdCompleter.isCompleted) {
+          threadIdCompleter.complete(event.threadId);
+        }
+      }
+
+      // Handle approval requests via callback
+      if (event is CodexApprovalRequiredEvent) {
+        session?.handleApprovalRequest(event.request);
+      }
+
+      // Capture error messages from error events
+      if (event is CodexErrorEvent) {
+        lastErrorMessage = event.message;
+      }
+
+      // Buffer events until first subscription, then emit directly
+      if (isSubscribed) {
+        eventController.add(event);
+      } else {
+        bufferedEvents.add(event);
+      }
+    });
 
     // When first listener subscribes, replay buffered events
     eventController.onListen = () {
@@ -302,25 +326,34 @@ class CodexCliAdapter {
       }
     });
 
-    // Close stdin to signal no more input
-    await process.stdin.close();
+    // Send initial createThread request with the prompt
+    final createRequest = {
+      'jsonrpc': '2.0',
+      'id': 1,
+      'method': 'createThread',
+      'params': {
+        'message': prompt,
+        'cwd': projectDirectory,
+      },
+    };
+    process.stdin.writeln(jsonEncode(createRequest));
 
     // Wait for thread ID from thread.started event
     final finalThreadId = await threadIdCompleter.future;
 
-    final session = await CodexSession.create(
+    session = await CodexSession.create(
+      process: process,
       eventController: eventController,
-      turnId: turnId,
       threadIdFuture: Future.value(finalThreadId),
+      approvalHandler: config.approvalHandler,
     );
 
-    session.currentProcess = process;
     return session;
   }
 
   /// Resume an existing session with a new prompt
   ///
-  /// Spawns a new Codex process with the resume subcommand.
+  /// Spawns a new app-server process and resumes the session.
   /// Returns a [CodexSession] for the resumed session.
   Future<CodexSession> resumeSession(
     String threadId,
@@ -328,20 +361,22 @@ class CodexCliAdapter {
     CodexSessionConfig config, {
     required String projectDirectory,
   }) async {
-    final args = buildResumeArgs(prompt, threadId, config);
-    final turnId = _turnCounter++;
+    final args = buildAppServerArgs(config);
 
     final process = await Process.start(
       'codex',
       args,
       workingDirectory: projectDirectory,
+      environment: config.environment,
     );
+
     final eventController = StreamController<CodexEvent>();
     final bufferedEvents = <CodexEvent>[];
     final stderrBuffer = StringBuffer();
     String? lastErrorMessage;
 
     var isSubscribed = false;
+    CodexSession? session;
 
     // Capture stderr for error reporting
     process.stderr.transform(utf8.decoder).listen((data) {
@@ -353,21 +388,39 @@ class CodexCliAdapter {
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
-          final event = parseJsonLine(line, threadId, turnId);
-          if (event == null) return;
+      final parsed = _parseJsonLine(line, threadId);
+      if (parsed == null) return;
 
-          // Capture error messages from error events
-          if (event is CodexErrorEvent) {
-            lastErrorMessage = event.message;
-          }
+      // Handle JSON-RPC responses
+      if (parsed['jsonrpc'] == '2.0' && parsed.containsKey('id')) {
+        session?.handleRpcResponse(parsed);
+        return;
+      }
 
-          // Buffer events until first subscription, then emit directly
-          if (isSubscribed) {
-            eventController.add(event);
-          } else {
-            bufferedEvents.add(event);
-          }
-        });
+      // Convert to event
+      final event = CodexEvent.fromJson(
+        parsed,
+        threadId,
+        session?.currentTurnId ?? 0,
+      );
+
+      // Handle approval requests via callback
+      if (event is CodexApprovalRequiredEvent) {
+        session?.handleApprovalRequest(event.request);
+      }
+
+      // Capture error messages from error events
+      if (event is CodexErrorEvent) {
+        lastErrorMessage = event.message;
+      }
+
+      // Buffer events until first subscription, then emit directly
+      if (isSubscribed) {
+        eventController.add(event);
+      } else {
+        bufferedEvents.add(event);
+      }
+    });
 
     // When first listener subscribes, replay buffered events
     eventController.onListen = () {
@@ -396,22 +449,31 @@ class CodexCliAdapter {
       }
     });
 
-    // Close stdin to signal no more input
-    await process.stdin.close();
+    // Send resumeThread request with the prompt
+    final resumeRequest = {
+      'jsonrpc': '2.0',
+      'id': 1,
+      'method': 'resumeThread',
+      'params': {
+        'thread_id': threadId,
+        'message': prompt,
+      },
+    };
+    process.stdin.writeln(jsonEncode(resumeRequest));
 
-    final session = await CodexSession.create(
+    session = await CodexSession.create(
+      process: process,
       eventController: eventController,
-      turnId: turnId,
       threadIdFuture: Future.value(threadId),
+      approvalHandler: config.approvalHandler,
     );
 
-    session.currentProcess = process;
     return session;
   }
 
-  /// Builds command-line arguments for starting a new Codex session
-  List<String> buildInitialArgs(String prompt, CodexSessionConfig config) {
-    final args = <String>['exec', '--json'];
+  /// Builds command-line arguments for the app-server
+  List<String> buildAppServerArgs(CodexSessionConfig config) {
+    final args = <String>['app-server'];
 
     // Handle fullAuto mode - skips approval and sandbox args
     if (config.fullAuto) {
@@ -419,11 +481,11 @@ class CodexCliAdapter {
     } else {
       // Approval policy
       args.add('-a');
-      args.add(formatEnumArg(config.approvalPolicy.name));
+      args.add(_formatEnumArg(config.approvalPolicy.name));
 
       // Sandbox mode
       args.add('-s');
-      args.add(formatEnumArg(config.sandboxMode.name));
+      args.add(_formatEnumArg(config.sandboxMode.name));
     }
 
     // Dangerous bypass
@@ -455,75 +517,14 @@ class CodexCliAdapter {
       args.addAll(config.extraArgs!);
     }
 
-    // Prompt
-    args.add(prompt);
-
     return args;
   }
 
-  /// Builds command-line arguments for resuming a Codex session
-  List<String> buildResumeArgs(
-    String prompt,
-    String threadId,
-    CodexSessionConfig config,
-  ) {
-    final args = <String>['exec', '--json'];
-
-    // Handle fullAuto mode
-    if (config.fullAuto) {
-      args.add('--full-auto');
-    } else {
-      // Approval policy
-      args.add('-a');
-      args.add(formatEnumArg(config.approvalPolicy.name));
-
-      // Sandbox mode
-      args.add('-s');
-      args.add(formatEnumArg(config.sandboxMode.name));
-    }
-
-    // Dangerous bypass
-    if (config.dangerouslyBypassAll) {
-      args.add('--dangerously-bypass-approvals-and-sandbox');
-    }
-
-    // Model
-    if (config.model != null) {
-      args.add('-m');
-      args.add(config.model!);
-    }
-
-    // Web search
-    if (config.enableWebSearch) {
-      args.add('--search');
-    }
-
-    // Config overrides
-    if (config.configOverrides != null) {
-      for (final override in config.configOverrides!) {
-        args.add('-c');
-        args.add(override);
-      }
-    }
-
-    // Extra args (for testing or advanced use)
-    if (config.extraArgs != null) {
-      args.addAll(config.extraArgs!);
-    }
-
-    // Resume command with thread ID and prompt
-    args.add('resume');
-    args.add(threadId);
-    args.add(prompt);
-
-    return args;
-  }
-
-  /// Parses a JSONL line into a Codex event
+  /// Parses a JSONL line into a JSON map
   ///
   /// Returns null for empty lines or non-JSON lines.
   /// Throws [FormatException] for malformed JSON that starts with '{'.
-  CodexEvent? parseJsonLine(String line, String threadId, int turnId) {
+  Map<String, dynamic>? _parseJsonLine(String line, String threadId) {
     final trimmed = line.trim();
     if (trimmed.isEmpty) return null;
 
@@ -531,12 +532,11 @@ class CodexCliAdapter {
     if (!trimmed.startsWith('{')) return null;
 
     // Parse JSON - let FormatException propagate for malformed JSON
-    final json = jsonDecode(trimmed) as Map<String, dynamic>;
-    return CodexEvent.fromJson(json, threadId, turnId);
+    return jsonDecode(trimmed) as Map<String, dynamic>;
   }
 
   /// Converts camelCase enum name to kebab-case CLI argument
-  String formatEnumArg(String enumName) {
+  String _formatEnumArg(String enumName) {
     final buffer = StringBuffer();
     for (var i = 0; i < enumName.length; i++) {
       final char = enumName[i];

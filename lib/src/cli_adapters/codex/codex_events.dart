@@ -87,6 +87,22 @@ sealed class CodexEvent {
           message: message,
         );
 
+      case 'approval.required':
+        return CodexApprovalRequiredEvent(
+          threadId: threadId,
+          turnId: turnId,
+          request: CodexApprovalRequest(
+            id: json['id'] as String? ?? '',
+            turnId: json['turn_id'] as String? ?? '',
+            actionType: json['action_type'] as String? ?? 'unknown',
+            description: json['description'] as String? ?? '',
+            toolName: json['tool_name'] as String?,
+            toolInput: json['tool_input'] as Map<String, dynamic>?,
+            command: json['command'] as String?,
+            filePath: json['file_path'] as String?,
+          ),
+        );
+
       case 'session_meta':
         final payload = json['payload'] as Map<String, dynamic>?;
         return CodexSessionMetaEvent(
@@ -272,5 +288,20 @@ class CodexUnknownEvent extends CodexEvent {
     super.timestamp,
     required this.type,
     required this.data,
+  });
+}
+
+/// Approval required event - emitted when the app-server needs approval
+///
+/// The client should call the session's [respondToApproval] method with
+/// a decision to continue execution.
+class CodexApprovalRequiredEvent extends CodexEvent {
+  final CodexApprovalRequest request;
+
+  CodexApprovalRequiredEvent({
+    required super.threadId,
+    required super.turnId,
+    super.timestamp,
+    required this.request,
   });
 }
