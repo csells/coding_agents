@@ -6,6 +6,32 @@ part of 'codex_types.dart';
 // JsonSerializableGenerator
 // **************************************************************************
 
+K _$enumDecode<K, V>(
+  Map<K, V> enumValues,
+  Object? source, {
+  K? unknownValue,
+}) {
+  if (source == null) {
+    throw ArgumentError(
+      'A value must be provided. Supported values: '
+      '${enumValues.values.join(', ')}',
+    );
+  }
+
+  return enumValues.entries.singleWhere(
+    (e) => e.value == source,
+    orElse: () {
+      if (unknownValue == null) {
+        throw ArgumentError(
+          '`$source` is not one of the supported values: '
+          '${enumValues.values.join(', ')}',
+        );
+      }
+      return MapEntry(unknownValue, enumValues.values.first);
+    },
+  ).key;
+}
+
 CodexSessionInfo _$CodexSessionInfoFromJson(Map<String, dynamic> json) =>
     CodexSessionInfo(
       threadId: json['threadId'] as String,
@@ -114,3 +140,50 @@ CodexTodoListItem _$CodexTodoListItemFromJson(Map<String, dynamic> json) =>
 
 Map<String, dynamic> _$CodexTodoListItemToJson(CodexTodoListItem instance) =>
     <String, dynamic>{'id': instance.id, 'items': instance.items};
+
+CodexApprovalRequest _$CodexApprovalRequestFromJson(
+  Map<String, dynamic> json,
+) => CodexApprovalRequest(
+  id: json['id'] as String,
+  turnId: json['turnId'] as String,
+  actionType: json['actionType'] as String,
+  description: json['description'] as String,
+  toolName: json['toolName'] as String?,
+  toolInput: json['toolInput'] as Map<String, dynamic>?,
+  command: json['command'] as String?,
+  filePath: json['filePath'] as String?,
+);
+
+Map<String, dynamic> _$CodexApprovalRequestToJson(
+  CodexApprovalRequest instance,
+) => <String, dynamic>{
+  'id': instance.id,
+  'turnId': instance.turnId,
+  'actionType': instance.actionType,
+  'description': instance.description,
+  'toolName': instance.toolName,
+  'toolInput': instance.toolInput,
+  'command': instance.command,
+  'filePath': instance.filePath,
+};
+
+CodexApprovalResponse _$CodexApprovalResponseFromJson(
+  Map<String, dynamic> json,
+) => CodexApprovalResponse(
+  decision: $enumDecode(_$CodexApprovalDecisionEnumMap, json['decision']),
+  message: json['message'] as String?,
+);
+
+Map<String, dynamic> _$CodexApprovalResponseToJson(
+  CodexApprovalResponse instance,
+) => <String, dynamic>{
+  'decision': _$CodexApprovalDecisionEnumMap[instance.decision]!,
+  'message': instance.message,
+};
+
+const _$CodexApprovalDecisionEnumMap = {
+  CodexApprovalDecision.allow: 'allow',
+  CodexApprovalDecision.deny: 'deny',
+  CodexApprovalDecision.allowAlways: 'allowAlways',
+  CodexApprovalDecision.denyAlways: 'denyAlways',
+};
