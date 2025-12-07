@@ -184,6 +184,82 @@ void main() {
       expect(systemEvent.subtype, 'compact_boundary');
     });
 
+    test('parses tool_progress event', () {
+      final json = {
+        'type': 'tool_progress',
+        'session_id': 'sess_abc123',
+        'timestamp': '2025-01-01T10:00:05.000Z',
+        'tool_use_id': 'toolu_01ABC123',
+        'tool_name': 'Bash',
+        'elapsed_time_seconds': 5.2,
+        'parent_tool_use_id': null,
+      };
+
+      final event = ClaudeEvent.fromJson(json, 2);
+
+      expect(event, isA<ClaudeToolProgressEvent>());
+      final progressEvent = event as ClaudeToolProgressEvent;
+      expect(progressEvent.sessionId, 'sess_abc123');
+      expect(progressEvent.toolUseId, 'toolu_01ABC123');
+      expect(progressEvent.toolName, 'Bash');
+      expect(progressEvent.elapsedTimeSeconds, 5.2);
+      expect(progressEvent.parentToolUseId, isNull);
+    });
+
+    test('parses tool_progress event with parent', () {
+      final json = {
+        'type': 'tool_progress',
+        'session_id': 'sess_abc123',
+        'tool_use_id': 'toolu_child',
+        'tool_name': 'Read',
+        'elapsed_time_seconds': 1.5,
+        'parent_tool_use_id': 'toolu_parent',
+      };
+
+      final event = ClaudeEvent.fromJson(json, 2);
+
+      expect(event, isA<ClaudeToolProgressEvent>());
+      final progressEvent = event as ClaudeToolProgressEvent;
+      expect(progressEvent.parentToolUseId, 'toolu_parent');
+    });
+
+    test('parses auth_status event authenticating', () {
+      final json = {
+        'type': 'auth_status',
+        'session_id': 'sess_abc123',
+        'timestamp': '2025-01-01T10:00:00.000Z',
+        'isAuthenticating': true,
+        'output': ['Authenticating with API key...'],
+        'error': null,
+      };
+
+      final event = ClaudeEvent.fromJson(json, 1);
+
+      expect(event, isA<ClaudeAuthStatusEvent>());
+      final authEvent = event as ClaudeAuthStatusEvent;
+      expect(authEvent.sessionId, 'sess_abc123');
+      expect(authEvent.isAuthenticating, true);
+      expect(authEvent.output, ['Authenticating with API key...']);
+      expect(authEvent.error, isNull);
+    });
+
+    test('parses auth_status event with error', () {
+      final json = {
+        'type': 'auth_status',
+        'session_id': 'sess_abc123',
+        'isAuthenticating': false,
+        'output': [],
+        'error': 'Invalid API key',
+      };
+
+      final event = ClaudeEvent.fromJson(json, 1);
+
+      expect(event, isA<ClaudeAuthStatusEvent>());
+      final authEvent = event as ClaudeAuthStatusEvent;
+      expect(authEvent.isAuthenticating, false);
+      expect(authEvent.error, 'Invalid API key');
+    });
+
     test('parses unknown event type gracefully', () {
       final json = {
         'type': 'future_event_type',
@@ -225,6 +301,19 @@ void main() {
         },
         {'type': 'result', 'session_id': 's1', 'subtype': 'success'},
         {'type': 'system', 'session_id': 's1', 'subtype': 'init'},
+        {
+          'type': 'tool_progress',
+          'session_id': 's1',
+          'tool_use_id': 't1',
+          'tool_name': 'Bash',
+          'elapsed_time_seconds': 1.0,
+        },
+        {
+          'type': 'auth_status',
+          'session_id': 's1',
+          'isAuthenticating': true,
+          'output': [],
+        },
       ];
 
       for (var i = 0; i < events.length; i++) {

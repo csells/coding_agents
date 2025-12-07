@@ -24,6 +24,8 @@ sealed class ClaudeEvent {
       'user' => ClaudeUserEvent.fromJson(json, turnId),
       'result' => ClaudeResultEvent.fromJson(json, turnId),
       'system' => ClaudeSystemEvent.fromJson(json, turnId),
+      'tool_progress' => ClaudeToolProgressEvent.fromJson(json, turnId),
+      'auth_status' => ClaudeAuthStatusEvent.fromJson(json, turnId),
       _ => ClaudeUnknownEvent(
         sessionId: sessionId,
         turnId: turnId,
@@ -195,6 +197,75 @@ class ClaudeSystemEvent extends ClaudeEvent {
             DateTime.now(),
         subtype: json['subtype'] as String? ?? 'unknown',
         data: json,
+      );
+}
+
+/// Tool progress event - real-time updates during tool execution
+class ClaudeToolProgressEvent extends ClaudeEvent {
+  final String toolUseId;
+  final String toolName;
+  final double elapsedTimeSeconds;
+  final String? parentToolUseId;
+
+  ClaudeToolProgressEvent({
+    required super.sessionId,
+    required super.turnId,
+    required super.timestamp,
+    required this.toolUseId,
+    required this.toolName,
+    required this.elapsedTimeSeconds,
+    this.parentToolUseId,
+  });
+
+  factory ClaudeToolProgressEvent.fromJson(
+    Map<String, dynamic> json,
+    int turnId,
+  ) =>
+      ClaudeToolProgressEvent(
+        sessionId: json['session_id'] as String? ?? '',
+        turnId: turnId,
+        timestamp:
+            DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+            DateTime.now(),
+        toolUseId: json['tool_use_id'] as String? ?? '',
+        toolName: json['tool_name'] as String? ?? '',
+        elapsedTimeSeconds:
+            (json['elapsed_time_seconds'] as num?)?.toDouble() ?? 0.0,
+        parentToolUseId: json['parent_tool_use_id'] as String?,
+      );
+}
+
+/// Authentication status event
+class ClaudeAuthStatusEvent extends ClaudeEvent {
+  final bool isAuthenticating;
+  final List<String> output;
+  final String? error;
+
+  ClaudeAuthStatusEvent({
+    required super.sessionId,
+    required super.turnId,
+    required super.timestamp,
+    required this.isAuthenticating,
+    required this.output,
+    this.error,
+  });
+
+  factory ClaudeAuthStatusEvent.fromJson(
+    Map<String, dynamic> json,
+    int turnId,
+  ) =>
+      ClaudeAuthStatusEvent(
+        sessionId: json['session_id'] as String? ?? '',
+        turnId: turnId,
+        timestamp:
+            DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+            DateTime.now(),
+        isAuthenticating: json['isAuthenticating'] as bool? ?? false,
+        output: (json['output'] as List<dynamic>?)
+                ?.map((e) => e as String)
+                .toList() ??
+            [],
+        error: json['error'] as String?,
       );
 }
 

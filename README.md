@@ -9,6 +9,21 @@ management from Dart applications.
 
 ## Features
 
+### Unified CodingAgent Abstraction
+
+A high-level abstraction that provides consistent APIs across all agents:
+
+- **`CodingAgent`**: Factory for creating sessions with agent-specific
+  configuration
+- **`CodingAgentSession`**: Manages conversation lifecycle with a continuous
+  event stream
+- **`CodingAgentTurn`**: Represents a single turn with cancellation support
+- **Unified events**: `CodingAgentEvent` hierarchy for consistent event handling
+
+### CLI Adapters
+
+Low-level adapters for direct CLI interaction:
+
 - **Claude Code Adapter**: Long-lived bidirectional JSONL sessions with
   streaming events, multi-turn conversations, and session resumption
 - **Codex CLI Adapter**: Process-per-turn model with thread-based session
@@ -17,6 +32,7 @@ management from Dart applications.
   resumption via UUID
 
 Each adapter provides:
+
 - Session creation and resumption
 - Streaming events (messages, tool calls, results)
 - Configuration options (models, approval modes, sandbox)
@@ -42,7 +58,46 @@ dependencies:
 
 ## Usage
 
-### Claude Code Adapter
+### Unified CodingAgent (Recommended)
+
+```dart
+import 'package:coding_agents/coding_agents.dart';
+
+// Create agent with agent-specific configuration
+final agent = ClaudeCodingAgent(
+  permissionMode: ClaudePermissionMode.bypassPermissions,
+);
+
+// Create a session
+final session = await agent.createSession(
+  projectDirectory: '/path/to/project',
+);
+
+// Subscribe to events (continuous across all turns)
+session.events.listen((event) {
+  switch (event) {
+    case CodingAgentTextEvent():
+      print(event.text);
+    case CodingAgentToolUseEvent():
+      print('Tool: ${event.toolName}');
+    case CodingAgentTurnEndEvent():
+      print('Turn complete: ${event.status}');
+    default:
+      break;
+  }
+});
+
+// Send a message (returns a turn for cancellation)
+final turn = await session.sendMessage('Hello!');
+
+// Send another message in the same session
+final turn2 = await session.sendMessage('What did I just say?');
+
+// Close when done
+await session.close();
+```
+
+### Low-Level Claude Code Adapter
 
 ```dart
 import 'package:coding_agents/coding_agents.dart';
@@ -198,37 +253,28 @@ for (final event in history) {
 
 ## Examples
 
-### Programmatic Examples
+### Unified CLI (Recommended)
 
-See the `example/` folder for programmatic usage examples:
-
-```bash
-dart run example/claude_code_cli.dart
-dart run example/codex_cli.dart
-dart run example/gemini_cli.dart
-```
-
-### Interactive CLI Examples
-
-The `example/simple_cli/` folder contains interactive CLI wrappers for each
-adapter:
+The unified CLI (`example/coding_cli.dart`) supports all three agents with an
+`--agent` flag:
 
 ```bash
-# Claude Code CLI
-dart run example/simple_cli/claude_cli.dart
+# Claude (default)
+dart run example/coding_cli.dart -p "What is 2+2?" -y
 
-# Codex CLI
-dart run example/simple_cli/codex_cli.dart
+# Codex
+dart run example/coding_cli.dart -a codex -p "What is 2+2?" -y
 
-# Gemini CLI
-dart run example/simple_cli/gemini_cli.dart
+# Gemini
+dart run example/coding_cli.dart -a gemini -p "What is 2+2?" -y
 ```
 
-**CLI Options:**
+**Unified CLI Options:**
 
 | Flag                  | Short | Description                                       |
 | --------------------- | ----- | ------------------------------------------------- |
 | `--help`              | `-h`  | Show help message                                 |
+| `--agent`             | `-a`  | Agent to use: claude, codex, gemini (default: claude) |
 | (none)                |       | Interactive multi-turn REPL                       |
 | `--project-directory` | `-d`  | Working directory (default: cwd)                  |
 | `--prompt`            | `-p`  | Execute a single prompt and exit                  |
@@ -236,29 +282,53 @@ dart run example/simple_cli/gemini_cli.dart
 | `--resume-session`    | `-r`  | Resume a session by ID                            |
 | `--yolo`              | `-y`  | Permissive mode (bypass approvals)                |
 
+### Test Script
+
+Run tests against all three agents:
+
+```bash
+./example/test_cli_agents.sh
+```
+
+### Adapter-Specific CLIs
+
+The `example/adapter_cli/` folder contains CLI wrappers for each low-level
+adapter:
+
+```bash
+# Claude Code CLI
+dart run example/adapter_cli/claude_cli.dart
+
+# Codex CLI
+dart run example/adapter_cli/codex_cli.dart
+
+# Gemini CLI
+dart run example/adapter_cli/gemini_cli.dart
+```
+
 **Usage Examples:**
 
 ```bash
 # Interactive REPL
-dart run example/simple_cli/claude_cli.dart
+dart run example/adapter_cli/claude_cli.dart
 
 # Show help
-dart run example/simple_cli/claude_cli.dart --help
+dart run example/adapter_cli/claude_cli.dart --help
 
 # One-shot prompt
-dart run example/simple_cli/claude_cli.dart -p "What is 2+2?"
+dart run example/adapter_cli/claude_cli.dart -p "What is 2+2?"
 
 # List sessions
-dart run example/simple_cli/claude_cli.dart -l
+dart run example/adapter_cli/claude_cli.dart -l
 
 # Resume session (shows history, then enters REPL)
-dart run example/simple_cli/claude_cli.dart -r <session-id>
+dart run example/adapter_cli/claude_cli.dart -r <session-id>
 
 # One-shot in resumed session
-dart run example/simple_cli/claude_cli.dart -r <session-id> -p "Continue"
+dart run example/adapter_cli/claude_cli.dart -r <session-id> -p "Continue"
 
 # Different project directory with yolo mode
-dart run example/simple_cli/claude_cli.dart -d /path/to/project -y
+dart run example/adapter_cli/claude_cli.dart -d /path/to/project -y
 ```
 
 ## Architecture
@@ -266,13 +336,40 @@ dart run example/simple_cli/claude_cli.dart -d /path/to/project -y
 ```
 lib/
 └── src/
-    └── cli_adapters/
-        ├── claude_code/  # Claude Code adapter
-        ├── codex/        # Codex CLI adapter
-        └── gemini/       # Gemini CLI adapter
+    ├── coding_agent/     # Unified CodingAgent abstraction
+    │   ├── coding_agent.dart
+    │   ├── coding_agent_events.dart
+    │   ├── coding_agent_types.dart
+    │   ├── claude_coding_agent.dart
+    │   ├── codex_coding_agent.dart
+    │   └── gemini_coding_agent.dart
+    └── cli_adapters/     # Low-level CLI adapters
+        ├── claude_code/
+        ├── codex/
+        └── gemini/
 ```
 
-Each adapter follows the pattern:
+### Unified CodingAgent Pattern
+
+```
+CodingAgent
+  └── createSession(projectDirectory) → CodingAgentSession
+  └── resumeSession(sessionId, projectDirectory) → CodingAgentSession
+  └── listSessions(projectDirectory) → List<CodingAgentSessionInfo>
+
+CodingAgentSession
+  ├── sessionId: String
+  ├── events: Stream<CodingAgentEvent>  # Continuous across turns
+  ├── sendMessage(prompt) → CodingAgentTurn
+  ├── getHistory() → List<CodingAgentEvent>
+  └── close() → void
+
+CodingAgentTurn
+  ├── turnId: int
+  └── cancel() → void
+```
+
+### Low-Level Adapter Pattern
 
 ```
 Client (per working directory)

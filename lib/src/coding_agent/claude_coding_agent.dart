@@ -337,6 +337,39 @@ class _ClaudeCodingAgentSession implements CodingAgentSession {
           ),
         );
 
+      case ClaudeToolProgressEvent():
+        // Tool progress events are informational - emit as unknown
+        _eventController.add(
+          CodingAgentUnknownEvent(
+            sessionId: sid,
+            turnId: turnId,
+            timestamp: event.timestamp,
+            originalType: 'claude_tool_progress',
+            data: {
+              'tool_use_id': event.toolUseId,
+              'tool_name': event.toolName,
+              'elapsed_time_seconds': event.elapsedTimeSeconds,
+              'parent_tool_use_id': event.parentToolUseId,
+            },
+          ),
+        );
+
+      case ClaudeAuthStatusEvent():
+        // Auth status events are informational - emit as unknown
+        _eventController.add(
+          CodingAgentUnknownEvent(
+            sessionId: sid,
+            turnId: turnId,
+            timestamp: event.timestamp,
+            originalType: 'claude_auth_status',
+            data: {
+              'isAuthenticating': event.isAuthenticating,
+              'output': event.output,
+              'error': event.error,
+            },
+          ),
+        );
+
       case ClaudeUnknownEvent():
         _eventController.add(
           CodingAgentUnknownEvent(
@@ -514,6 +547,37 @@ class _ClaudeCodingAgentSession implements CodingAgentSession {
             timestamp: event.timestamp,
             originalType: 'claude_system_${event.subtype}',
             data: event.data,
+          ),
+        );
+
+      case ClaudeToolProgressEvent():
+        events.add(
+          CodingAgentUnknownEvent(
+            sessionId: sid,
+            turnId: turnId,
+            timestamp: event.timestamp,
+            originalType: 'claude_tool_progress',
+            data: {
+              'tool_use_id': event.toolUseId,
+              'tool_name': event.toolName,
+              'elapsed_time_seconds': event.elapsedTimeSeconds,
+              'parent_tool_use_id': event.parentToolUseId,
+            },
+          ),
+        );
+
+      case ClaudeAuthStatusEvent():
+        events.add(
+          CodingAgentUnknownEvent(
+            sessionId: sid,
+            turnId: turnId,
+            timestamp: event.timestamp,
+            originalType: 'claude_auth_status',
+            data: {
+              'isAuthenticating': event.isAuthenticating,
+              'output': event.output,
+              'error': event.error,
+            },
           ),
         );
 

@@ -29,7 +29,7 @@ the native streaming protocols.
 | CLI             | Headless Command      | Output Flag                   | Message Format |
 | --------------- | --------------------- | ----------------------------- | -------------- |
 | **Claude Code** | `claude -p "prompt"`  | `--output-format stream-json` | JSONL          |
-| **Codex CLI**   | `codex exec "prompt"` | `--output-jsonl`              | JSONL          |
+| **Codex CLI**   | `codex "prompt"`      | `--json`                      | JSONL          |
 | **Gemini CLI**  | `gemini -p "prompt"`  | `--output-format stream-json` | JSONL          |
 
 ### Multi-Turn Architecture Comparison
@@ -196,73 +196,141 @@ follow-up messages.
 
 ```typescript
 type ClaudeStreamEventType =
-  | "init"         // Session initialization with session_id
-  | "message"      // Assistant or user message content
-  | "tool_use"     // Tool invocation request
-  | "tool_result"  // Tool execution result
-  | "result"       // Session completion status
-  | "error"        // Error occurred
-  | "system"       // System event (multiple subtypes)
-  | "stream_event" // Raw API streaming delta (--verbose mode only)
+  | "user"           // User message (input to the model)
+  | "assistant"      // Assistant message (model output)
+  | "tool_use"       // Tool invocation request
+  | "tool_result"    // Tool execution result
+  | "tool_progress"  // Real-time tool execution progress
+  | "result"         // Session completion status
+  | "error"          // Error occurred
+  | "system"         // System event (multiple subtypes)
+  | "stream_event"   // Raw API streaming delta (with includePartialMessages)
+  | "auth_status"    // Authentication state updates
 
 // System event subtypes
 type ClaudeSystemSubtype =
   | "init"             // System initialization info
   | "compact_boundary" // Context compaction marker
+  | "status"           // Status updates (e.g., compacting)
+  | "hook_response"    // Hook callback responses
 
 // Message content block types
 type ClaudeContentBlockType =
   | "text"      // Plain text content
   | "tool_use"  // Inline tool use reference
 
-// Result status values
-type ClaudeResultStatus =
-  | "success"   // Completed successfully
-  | "error"     // Completed with error
-  | "cancelled" // User cancelled
+// Result status values (via subtype field)
+type ClaudeResultSubtype =
+  | "success"                        // Completed successfully
+  | "error_during_execution"         // Error during execution
+  | "error_max_turns"                // Max turns limit reached
+  | "error_max_budget_usd"           // Budget limit reached
+  | "error_max_structured_output_retries" // Structured output retries exceeded
+
+// Assistant message error types
+type ClaudeAssistantErrorType =
+  | "authentication_failed"
+  | "billing_error"
+  | "rate_limit"
+  | "invalid_request"
+  | "server_error"
+  | "unknown"
 ```
 
-### 3.4 Event Schemas
+### 3.5 Event Schemas
 
-#### Init Event
+All events include `uuid` and `session_id` fields for correlation.
+
+#### System Event (Init Subtype)
+The first event emitted when a session starts:
 ```json
 {
-  "type": "init",
+  "type": "system",
+  "subtype": "init",
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
   "session_id": "sess_abc123",
-  "timestamp": "2025-12-03T10:00:00.000Z"
+  "agents": ["agent1", "agent2"],
+  "apiKeySource": "user",
+  "betas": ["context-1m-2025-08-07"],
+  "claude_code_version": "1.0.32",
+  "cwd": "/path/to/project",
+  "tools": ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
+  "mcp_servers": [{"name": "server1", "status": "connected"}],
+  "model": "claude-sonnet-4-20250514",
+  "permissionMode": "default",
+  "slash_commands": ["/help", "/clear"],
+  "output_style": "text",
+  "skills": [],
+  "plugins": [{"name": "plugin1", "path": "/path/to/plugin"}]
 }
 ```
 
-#### Message Event (Assistant)
+**apiKeySource values:** `user`, `project`, `org`, `temporary`
+
+**permissionMode values:** `default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk`
+
+#### User Event
+User messages sent to the model:
 ```json
 {
-  "type": "message",
-  "role": "assistant",
-  "content": [
-    {
-      "type": "text",
-      "text": "I'll help you refactor the authentication module..."
-    }
-  ]
+  "type": "user",
+  "uuid": "550e8400-e29b-41d4-a716-446655440001",
+  "session_id": "sess_abc123",
+  "message": {
+    "role": "user",
+    "content": [{"type": "text", "text": "Refactor the auth module"}]
+  },
+  "parent_tool_use_id": null,
+  "isSynthetic": false,
+  "tool_use_result": null
 }
 ```
 
-#### Message Event (Partial/Streaming)
+#### User Event (Replay)
+Acknowledgment of previously added user messages:
 ```json
 {
-  "type": "message",
-  "role": "assistant",
-  "content": [
-    {
-      "type": "text",
-      "text": "I'll help"
-    }
-  ],
-  "partial": true
+  "type": "user",
+  "uuid": "550e8400-e29b-41d4-a716-446655440002",
+  "session_id": "sess_abc123",
+  "message": {...},
+  "parent_tool_use_id": null,
+  "isReplay": true
+}
+```
+
+#### Assistant Event
+Assistant responses from the model:
+```json
+{
+  "type": "assistant",
+  "uuid": "550e8400-e29b-41d4-a716-446655440003",
+  "session_id": "sess_abc123",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {"type": "text", "text": "I'll help you refactor the authentication module..."}
+    ]
+  },
+  "parent_tool_use_id": null,
+  "error": null
+}
+```
+
+When an error occurs during model response:
+```json
+{
+  "type": "assistant",
+  "uuid": "...",
+  "session_id": "...",
+  "message": {...},
+  "parent_tool_use_id": null,
+  "error": "rate_limit"
 }
 ```
 
 #### Tool Use Event
+Tool invocation request (embedded in assistant message content):
 ```json
 {
   "type": "tool_use",
@@ -277,6 +345,7 @@ type ClaudeResultStatus =
 ```
 
 #### Tool Result Event
+Tool execution result (embedded in user message as tool_use_result):
 ```json
 {
   "type": "tool_result",
@@ -286,13 +355,80 @@ type ClaudeResultStatus =
 }
 ```
 
-#### Result Event
+#### Tool Progress Event
+Real-time progress updates during tool execution:
+```json
+{
+  "type": "tool_progress",
+  "uuid": "550e8400-e29b-41d4-a716-446655440004",
+  "session_id": "sess_abc123",
+  "tool_use_id": "toolu_01ABC123",
+  "tool_name": "Bash",
+  "parent_tool_use_id": null,
+  "elapsed_time_seconds": 5.2
+}
+```
+
+#### Result Event (Success)
 ```json
 {
   "type": "result",
-  "status": "success",
+  "subtype": "success",
+  "uuid": "550e8400-e29b-41d4-a716-446655440005",
   "session_id": "sess_abc123",
-  "duration_ms": 5000
+  "duration_ms": 12500,
+  "duration_api_ms": 10200,
+  "is_error": false,
+  "num_turns": 3,
+  "result": "Done! I've refactored the auth module.",
+  "total_cost_usd": 0.0125,
+  "usage": {
+    "input_tokens": 5000,
+    "output_tokens": 1200,
+    "cache_read_input_tokens": 2000,
+    "cache_creation_input_tokens": 500,
+    "web_search_requests": 0,
+    "costUSD": 0.0125,
+    "contextWindow": 200000
+  },
+  "modelUsage": {
+    "claude-sonnet-4-20250514": {
+      "inputTokens": 5000,
+      "outputTokens": 1200,
+      "cacheReadInputTokens": 2000,
+      "cacheCreationInputTokens": 500,
+      "webSearchRequests": 0,
+      "costUSD": 0.0125,
+      "contextWindow": 200000
+    }
+  },
+  "permission_denials": [],
+  "structured_output": null
+}
+```
+
+#### Result Event (Error)
+```json
+{
+  "type": "result",
+  "subtype": "error_during_execution",
+  "uuid": "...",
+  "session_id": "sess_abc123",
+  "duration_ms": 5000,
+  "duration_api_ms": 4500,
+  "is_error": true,
+  "num_turns": 2,
+  "total_cost_usd": 0.005,
+  "usage": {...},
+  "modelUsage": {...},
+  "permission_denials": [
+    {
+      "tool_name": "Bash",
+      "tool_use_id": "toolu_01XYZ",
+      "tool_input": {"command": "rm -rf /"}
+    }
+  ],
+  "errors": ["Tool execution blocked by user"]
 }
 ```
 
@@ -307,83 +443,126 @@ type ClaudeResultStatus =
 }
 ```
 
-#### System Event (Init Subtype)
-```json
-{
-  "type": "system",
-  "subtype": "init",
-  "version": "1.0.32",
-  "cwd": "/path/to/project",
-  "tools": ["Read", "Edit", "Write", "Bash", "Glob", "Grep"]
-}
-```
-
 #### System Event (Compact Boundary Subtype)
+Emitted when conversation context is compacted:
 ```json
 {
   "type": "system",
   "subtype": "compact_boundary",
+  "uuid": "...",
+  "session_id": "sess_abc123",
   "compact_metadata": {
     "trigger": "auto",
-    "pre_tokens": 50000,
-    "post_tokens": 25000,
-    "summary_tokens": 500
+    "pre_tokens": 50000
   }
 }
 ```
 
-#### Stream Event (Verbose Mode Only)
-When `--verbose` flag is enabled, raw API streaming deltas are exposed:
+**trigger values:** `auto`, `manual`
+
+#### System Event (Status Subtype)
+Status updates during processing:
 ```json
 {
-  "type": "stream_event",
-  "event_type": "content_block_delta",
-  "index": 0,
-  "delta": {
-    "type": "text_delta",
-    "text": "I'll"
-  }
+  "type": "system",
+  "subtype": "status",
+  "uuid": "...",
+  "session_id": "sess_abc123",
+  "status": "compacting"
 }
 ```
 
+#### System Event (Hook Response Subtype)
+Hook callback execution responses:
 ```json
 {
-  "type": "stream_event",
-  "event_type": "message_stop"
+  "type": "system",
+  "subtype": "hook_response",
+  "uuid": "...",
+  "session_id": "sess_abc123",
+  "hook_name": "PreToolUse",
+  "hook_event": "Edit",
+  "stdout": "Hook output...",
+  "stderr": "",
+  "exit_code": 0
 }
 ```
 
-### 3.5 Complete Event Flow Example
+#### Stream Event (Partial Messages)
+When `includePartialMessages` is enabled, raw API streaming deltas are exposed:
+```json
+{
+  "type": "stream_event",
+  "uuid": "...",
+  "session_id": "sess_abc123",
+  "event": {
+    "type": "content_block_delta",
+    "index": 0,
+    "delta": {"type": "text_delta", "text": "I'll"}
+  },
+  "parent_tool_use_id": null
+}
+```
+
+#### Auth Status Event
+Authentication state updates:
+```json
+{
+  "type": "auth_status",
+  "uuid": "...",
+  "session_id": "sess_abc123",
+  "isAuthenticating": true,
+  "output": ["Authenticating with API key..."],
+  "error": null
+}
+```
+
+### 3.6 Complete Event Flow Example
 
 ```jsonl
-{"type":"init","session_id":"sess_abc123","timestamp":"2025-12-03T10:00:00.000Z"}
-{"type":"message","role":"assistant","content":[{"type":"text","text":"I'll analyze the codebase..."}]}
-{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/src/auth.ts"}}
-{"type":"tool_result","tool_use_id":"toolu_01","content":"export function login()...","is_error":false}
-{"type":"message","role":"assistant","content":[{"type":"text","text":"I found the auth module. Let me refactor it..."}]}
-{"type":"tool_use","id":"toolu_02","name":"Edit","input":{"file_path":"/src/auth.ts","old_string":"function login()","new_string":"async function login()"}}
-{"type":"tool_result","tool_use_id":"toolu_02","content":"File updated","is_error":false}
-{"type":"message","role":"assistant","content":[{"type":"text","text":"Done! I've made the login function async."}]}
-{"type":"result","status":"success","session_id":"sess_abc123","duration_ms":12500}
+{"type":"system","subtype":"init","uuid":"uuid1","session_id":"sess_abc123","claude_code_version":"1.0.32","cwd":"/project","tools":["Read","Edit"],"model":"claude-sonnet-4-20250514","permissionMode":"default"}
+{"type":"user","uuid":"uuid2","session_id":"sess_abc123","message":{"role":"user","content":[{"type":"text","text":"Refactor the auth module"}]},"parent_tool_use_id":null}
+{"type":"assistant","uuid":"uuid3","session_id":"sess_abc123","message":{"role":"assistant","content":[{"type":"text","text":"I'll analyze the codebase..."},{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/src/auth.ts"}}]},"parent_tool_use_id":null}
+{"type":"user","uuid":"uuid4","session_id":"sess_abc123","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"export function login()..."}]},"parent_tool_use_id":"toolu_01","isSynthetic":true}
+{"type":"assistant","uuid":"uuid5","session_id":"sess_abc123","message":{"role":"assistant","content":[{"type":"text","text":"I found the auth module. Let me refactor it..."},{"type":"tool_use","id":"toolu_02","name":"Edit","input":{"file_path":"/src/auth.ts","old_string":"function login()","new_string":"async function login()"}}]},"parent_tool_use_id":null}
+{"type":"tool_progress","uuid":"uuid6","session_id":"sess_abc123","tool_use_id":"toolu_02","tool_name":"Edit","elapsed_time_seconds":0.5}
+{"type":"user","uuid":"uuid7","session_id":"sess_abc123","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_02","content":"File updated"}]},"parent_tool_use_id":"toolu_02","isSynthetic":true}
+{"type":"assistant","uuid":"uuid8","session_id":"sess_abc123","message":{"role":"assistant","content":[{"type":"text","text":"Done! I've made the login function async."}]},"parent_tool_use_id":null}
+{"type":"result","subtype":"success","uuid":"uuid9","session_id":"sess_abc123","duration_ms":12500,"is_error":false,"num_turns":3,"result":"Done!","usage":{"input_tokens":5000,"output_tokens":1200}}
 ```
 
-### 3.6 Permission Control
+### 3.7 Permission Control
 
-| Mode          | Flag                              | Behavior                  |
-| ------------- | --------------------------------- | ------------------------- |
-| Default (ask) | (none)                            | Prompt for each tool      |
-| YOLO          | `--dangerously-skip-permissions`  | Auto-approve all          |
-| Allowlist     | `--allowedTools "Read,Edit"`      | Auto-approve listed tools |
-| Blocklist     | `--disallowedTools "Bash"`        | Block listed tools        |
-| Plan mode     | `--permission-mode plan`          | Planning only             |
-| MCP Delegate  | `--permission-prompt-tool <tool>` | Delegate to MCP tool      |
+| Mode           | Flag / SDK Option                 | Behavior                    |
+| -------------- | --------------------------------- | --------------------------- |
+| Default        | `permissionMode: "default"`       | Prompt for each tool        |
+| Accept Edits   | `permissionMode: "acceptEdits"`   | Auto-approve file edits     |
+| Bypass All     | `permissionMode: "bypassPermissions"` | Auto-approve all (YOLO) |
+| Plan mode      | `permissionMode: "plan"`          | Planning only, no execution |
+| Don't Ask      | `permissionMode: "dontAsk"`       | Deny if not pre-approved    |
+| CLI YOLO       | `--dangerously-skip-permissions`  | Auto-approve all            |
+| Allowlist      | `--allowedTools "Read,Edit"`      | Auto-approve listed tools   |
+| Blocklist      | `--disallowedTools "Bash"`        | Block listed tools          |
+| MCP Delegate   | `--permission-prompt-tool <tool>` | Delegate to MCP tool        |
 
 **Tool format examples:**
 ```bash
 --allowedTools "Bash(git log:*)" "Bash(git diff:*)" "Read" "Edit"
 ```
 
-### 3.7 Permission Prompt Tool (MCP Delegation)
+**SDK canUseTool callback:**
+```typescript
+canUseTool: async (toolName, input, options) => {
+  // Return permission decision
+  return { behavior: 'allow' };
+  // Or with updated input
+  return { behavior: 'allow', updatedInput: {...} };
+  // Or deny
+  return { behavior: 'deny', message: 'Reason for denial' };
+}
+```
+
+### 3.8 Permission Prompt Tool (MCP Delegation)
 
 For headless orchestration, Claude Code supports delegating permission prompts
 to an external MCP tool via `--permission-prompt-tool
@@ -458,7 +637,7 @@ emitted in the stream. The permission flow is handled entirely through the MCP
 tool call mechanism. The orchestrating client must implement the MCP server with
 the permission handling tool.
 
-### 3.8 Session Management
+### 3.9 Session Management
 
 **List sessions:**
 ```bash
@@ -480,6 +659,41 @@ claude -c -p "continue"
 ~/.claude/sessions/
 ```
 
+**SDK Session Options:**
+```typescript
+{
+  resume: "sess_abc123",           // Resume by session ID
+  resumeSessionAt: "uuid-of-msg",  // Resume at specific message UUID
+  continue: true,                  // Continue most recent session
+  forkSession: true,               // Fork to new session when resuming
+}
+```
+
+**V2 Unstable API (SDK):**
+```typescript
+// Create a persistent session
+const session = await claude.unstable_v2_createSession(options);
+
+// Resume an existing session
+const session = await claude.unstable_v2_resumeSession(sessionId, options);
+
+// One-shot convenience function
+const result = await claude.unstable_v2_prompt(prompt, options);
+```
+
+**Query Control Methods (SDK):**
+```typescript
+const query = claude.query(options);
+query.interrupt();                    // Stop processing
+query.setPermissionMode(mode);        // Change permission mode
+query.setModel(model);                // Change model
+query.setMaxThinkingTokens(tokens);   // Set thinking token limit
+query.supportedCommands();            // Get available slash commands
+query.supportedModels();              // Get available models
+query.mcpServerStatus();              // Get MCP server status
+query.accountInfo();                  // Get authenticated account info
+```
+
 ---
 
 ## 4. Codex CLI Protocol
@@ -488,36 +702,37 @@ claude -c -p "continue"
 
 **Basic headless execution:**
 ```bash
-codex exec --output-jsonl "Your prompt here"
+codex --json "Your prompt here"
 ```
 
 **Resume session:**
 ```bash
-codex exec --output-jsonl --resume sess_abc123 "Continue with..."
-codex resume --last  # Interactive resume
-codex resume sess_abc123  # Resume specific
+codex resume --last "Continue with..."     # Resume most recent
+codex resume <thread_id> "Continue with..."  # Resume specific
 ```
 
 **Full auto mode:**
 ```bash
-codex exec --output-jsonl --full-auto "Your prompt"
+codex --json --full-auto "Your prompt"
 ```
 
 ### 4.2 CLI Arguments
 
-| Argument                 | Short | Description                       |
-| ------------------------ | ----- | --------------------------------- |
-| `exec`                   |       | Non-interactive mode subcommand   |
-| `--output-jsonl`         |       | Enable JSONL streaming            |
-| `--output-last-message`  | `-o`  | Output only final message         |
-| `--output-schema <file>` |       | JSON schema for structured output |
-| `--ask-for-approval`     | `-a`  | Require approval (untrusted mode) |
-| `--full-auto`            |       | Auto-approve all (danger mode)    |
-| `--model <name>`         |       | Model selection                   |
-| `--cd <path>`            |       | Working directory                 |
-| `--env KEY=val`          |       | Set environment variable          |
-| `resume`                 |       | Resume session subcommand         |
-| `--last`                 |       | Resume most recent session        |
+| Argument                                   | Short | Description                       |
+| ------------------------------------------ | ----- | --------------------------------- |
+| `--json`                                   |       | Enable JSONL streaming to stdout  |
+| `--output-last-message <file>`             | `-o`  | Write final message to file       |
+| `--output-schema <file>`                   |       | JSON schema for structured output |
+| `--full-auto`                              |       | Auto-approve with workspace sandbox |
+| `--dangerously-bypass-approvals-and-sandbox` | `--yolo` | Full access, no sandboxing    |
+| `--model <name>`                           | `-m`  | Model selection                   |
+| `--cd <path>`                              | `-C`  | Working directory                 |
+| `--sandbox <policy>`                       | `-s`  | Sandbox policy                    |
+| `--image <file>`                           | `-i`  | Attach image(s)                   |
+| `--add-dir <dir>`                          |       | Additional writable directories   |
+| `--skip-git-repo-check`                    |       | Allow outside Git repos           |
+| `resume`                                   |       | Resume session subcommand         |
+| `--last`                                   |       | Resume most recent session        |
 
 ### 4.3 Input Format (stdin)
 
@@ -525,31 +740,30 @@ Codex CLI does **NOT** support continuous JSONL input streaming. Each invocation
 processes a single prompt.
 
 **Input mechanism:**
-- Prompt is passed as a command-line argument to `codex exec`
-- Stdin is written with the prompt string, then **immediately closed**
-- For multi-turn, spawn a new process with `--resume <session_id>`
+- Prompt is passed as a command-line argument
+- For multi-turn, spawn a new process with `codex resume <thread_id>`
 
 **Single-turn flow:**
 ```bash
-codex exec --output-jsonl "Your prompt here"
+codex --json "Your prompt here"
 ```
 
 **Multi-turn flow (process-per-turn):**
 ```bash
 # Turn 1: Initial prompt
-codex exec --output-jsonl "Analyze the auth module"
+codex --json "Analyze the auth module"
 # Output includes thread_id in thread.started event
 
 # Turn 2: Resume with follow-up
-codex exec --output-jsonl --resume <thread_id> "Now refactor it"
+codex resume <thread_id> "Now refactor it"
 
 # Turn 3: Continue
-codex exec --output-jsonl --resume <thread_id> "Add tests"
+codex resume <thread_id> "Add tests"
 ```
 
 **Key difference from Claude Code:** Codex requires a new process for each turn.
 The session state is persisted to disk (`~/.codex/sessions/`) and restored via
-`--resume`.
+`resume` subcommand.
 
 ### 4.4 Event Types
 
@@ -584,12 +798,22 @@ type CodexItemType =
 
 // Item status values
 type CodexItemStatus =
-  | "success"  // Item completed successfully
-  | "failed"   // Item execution failed
-  | "skipped"  // Item was skipped
+  | "in_progress"  // Item currently executing
+  | "completed"    // Item completed successfully (alias: "success")
+  | "failed"       // Item execution failed
+  | "declined"     // Item was declined (e.g., user denied permission)
+  | "skipped"      // Item was skipped
+
+// File change kinds
+type CodexFileChangeKind =
+  | "add"     // New file created
+  | "delete"  // File deleted
+  | "update"  // File modified
 ```
 
 ### 4.5 Event Schemas
+
+All item events include a full `item` object with an `id` field for correlation.
 
 #### Thread Started
 ```json
@@ -606,11 +830,15 @@ type CodexItemStatus =
 }
 ```
 
-#### Item Started
+#### Item Started (Agent Message)
 ```json
 {
   "type": "item.started",
-  "item_type": "agent_message"
+  "item": {
+    "id": "item_001",
+    "type": "agent_message",
+    "text": ""
+  }
 }
 ```
 
@@ -618,8 +846,23 @@ type CodexItemStatus =
 ```json
 {
   "type": "item.updated",
-  "item_type": "agent_message",
-  "content": "I'll help you refactor..."
+  "item": {
+    "id": "item_001",
+    "type": "agent_message",
+    "text": "I'll help you refactor..."
+  }
+}
+```
+
+#### Item Completed (Agent Message)
+```json
+{
+  "type": "item.completed",
+  "item": {
+    "id": "item_001",
+    "type": "agent_message",
+    "text": "I'll help you refactor the authentication module."
+  }
 }
 ```
 
@@ -627,9 +870,29 @@ type CodexItemStatus =
 ```json
 {
   "type": "item.updated",
-  "item_type": "command_execution",
-  "command_line": "npm test",
-  "aggregated_output": "[PASS] auth.test.js\n[PASS] user.test.js\n"
+  "item": {
+    "id": "item_002",
+    "type": "command_execution",
+    "command": "npm test",
+    "aggregated_output": "[PASS] auth.test.js\n[PASS] user.test.js\n",
+    "exit_code": null,
+    "status": "in_progress"
+  }
+}
+```
+
+#### Item Completed (Command Execution)
+```json
+{
+  "type": "item.completed",
+  "item": {
+    "id": "item_002",
+    "type": "command_execution",
+    "command": "npm test",
+    "aggregated_output": "[PASS] auth.test.js\n[PASS] user.test.js\n",
+    "exit_code": 0,
+    "status": "completed"
+  }
 }
 ```
 
@@ -637,14 +900,35 @@ type CodexItemStatus =
 ```json
 {
   "type": "item.updated",
-  "item_type": "file_change",
-  "changes": [
-    {
-      "path": "src/auth.ts",
-      "before": "function login() {",
-      "after": "async function login() {"
-    }
-  ]
+  "item": {
+    "id": "item_003",
+    "type": "file_change",
+    "changes": [
+      {
+        "path": "src/auth.ts",
+        "kind": "update"
+      }
+    ],
+    "status": "in_progress"
+  }
+}
+```
+
+#### Item Completed (File Change)
+```json
+{
+  "type": "item.completed",
+  "item": {
+    "id": "item_003",
+    "type": "file_change",
+    "changes": [
+      {
+        "path": "src/auth.ts",
+        "kind": "update"
+      }
+    ],
+    "status": "completed"
+  }
 }
 ```
 
@@ -652,10 +936,36 @@ type CodexItemStatus =
 ```json
 {
   "type": "item.updated",
-  "item_type": "mcp_tool_call",
-  "tool_name": "database_query",
-  "tool_input": {"sql": "SELECT * FROM users"},
-  "tool_result": "[{\"id\":1,\"name\":\"Alice\"}]"
+  "item": {
+    "id": "item_004",
+    "type": "mcp_tool_call",
+    "server": "database",
+    "tool": "query",
+    "arguments": {"sql": "SELECT * FROM users"},
+    "result": null,
+    "error": null,
+    "status": "in_progress"
+  }
+}
+```
+
+#### Item Completed (MCP Tool Call)
+```json
+{
+  "type": "item.completed",
+  "item": {
+    "id": "item_004",
+    "type": "mcp_tool_call",
+    "server": "database",
+    "tool": "query",
+    "arguments": {"sql": "SELECT * FROM users"},
+    "result": {
+      "content": [{"type": "text", "text": "[{\"id\":1,\"name\":\"Alice\"}]"}],
+      "structured_content": null
+    },
+    "error": null,
+    "status": "completed"
+  }
 }
 ```
 
@@ -664,9 +974,11 @@ Internal chain-of-thought reasoning (visible in output):
 ```json
 {
   "type": "item.updated",
-  "item_type": "reasoning",
-  "reasoning": "I need to analyze the authentication flow. First, let me check the login function...",
-  "summary": "Analyzing authentication flow"
+  "item": {
+    "id": "item_005",
+    "type": "reasoning",
+    "text": "I need to analyze the authentication flow..."
+  }
 }
 ```
 
@@ -674,15 +986,11 @@ Internal chain-of-thought reasoning (visible in output):
 ```json
 {
   "type": "item.updated",
-  "item_type": "web_search",
-  "query": "typescript async await best practices 2025",
-  "results": [
-    {
-      "title": "Async/Await Best Practices",
-      "url": "https://example.com/article",
-      "snippet": "Modern TypeScript async patterns..."
-    }
-  ]
+  "item": {
+    "id": "item_006",
+    "type": "web_search",
+    "query": "typescript async await best practices 2025"
+  }
 }
 ```
 
@@ -690,12 +998,15 @@ Internal chain-of-thought reasoning (visible in output):
 ```json
 {
   "type": "item.updated",
-  "item_type": "todo_list",
-  "items": [
-    {"id": "1", "task": "Analyze current auth implementation", "status": "completed"},
-    {"id": "2", "task": "Refactor to async/await", "status": "in_progress"},
-    {"id": "3", "task": "Update tests", "status": "pending"}
-  ]
+  "item": {
+    "id": "item_007",
+    "type": "todo_list",
+    "items": [
+      {"text": "Analyze current auth implementation", "completed": true},
+      {"text": "Refactor to async/await", "completed": false},
+      {"text": "Update tests", "completed": false}
+    ]
+  }
 }
 ```
 
@@ -703,24 +1014,11 @@ Internal chain-of-thought reasoning (visible in output):
 ```json
 {
   "type": "item.updated",
-  "item_type": "error",
-  "error_type": "execution_failed",
-  "message": "Command exited with non-zero status",
-  "details": {
-    "command": "npm test",
-    "exit_code": 1,
-    "stderr": "Error: Test failed..."
+  "item": {
+    "id": "item_008",
+    "type": "error",
+    "message": "Command exited with non-zero status"
   }
-}
-```
-
-#### Item Completed
-```json
-{
-  "type": "item.completed",
-  "item_type": "command_execution",
-  "status": "success",
-  "exit_code": 0
 }
 ```
 
@@ -759,20 +1057,18 @@ Internal chain-of-thought reasoning (visible in output):
 ```jsonl
 {"type":"thread.started","thread_id":"sess_abc123"}
 {"type":"turn.started"}
-{"type":"item.started","item_type":"reasoning"}
-{"type":"item.updated","item_type":"reasoning","reasoning":"I need to analyze the auth module first..."}
-{"type":"item.completed","item_type":"reasoning","status":"success"}
-{"type":"item.started","item_type":"command_execution"}
-{"type":"item.updated","item_type":"command_execution","command_line":"cat src/auth.ts","aggregated_output":""}
-{"type":"item.updated","item_type":"command_execution","command_line":"cat src/auth.ts","aggregated_output":"export function login() {..."}
-{"type":"item.completed","item_type":"command_execution","status":"success","exit_code":0}
-{"type":"item.started","item_type":"file_change"}
-{"type":"item.updated","item_type":"file_change","changes":[{"path":"src/auth.ts","before":"function login()","after":"async function login()"}]}
-{"type":"item.completed","item_type":"file_change","status":"success"}
-{"type":"item.started","item_type":"agent_message"}
-{"type":"item.updated","item_type":"agent_message","content":"I've refactored the login function to be async."}
-{"type":"item.completed","item_type":"agent_message","status":"success"}
-{"type":"turn.completed","usage":{"input_tokens":1250,"output_tokens":487}}
+{"type":"item.started","item":{"id":"1","type":"reasoning","text":""}}
+{"type":"item.updated","item":{"id":"1","type":"reasoning","text":"I need to analyze the auth module first..."}}
+{"type":"item.completed","item":{"id":"1","type":"reasoning","text":"I need to analyze the auth module first..."}}
+{"type":"item.started","item":{"id":"2","type":"command_execution","command":"cat src/auth.ts","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.updated","item":{"id":"2","type":"command_execution","command":"cat src/auth.ts","aggregated_output":"export function login() {...","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"2","type":"command_execution","command":"cat src/auth.ts","aggregated_output":"export function login() {...","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"3","type":"file_change","changes":[{"path":"src/auth.ts","kind":"update"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"3","type":"file_change","changes":[{"path":"src/auth.ts","kind":"update"}],"status":"completed"}}
+{"type":"item.started","item":{"id":"4","type":"agent_message","text":""}}
+{"type":"item.updated","item":{"id":"4","type":"agent_message","text":"I've refactored the login function to be async."}}
+{"type":"item.completed","item":{"id":"4","type":"agent_message","text":"I've refactored the login function to be async."}}
+{"type":"turn.completed","usage":{"input_tokens":1250,"cached_input_tokens":500,"output_tokens":487}}
 ```
 
 ### 4.7 Permission Control
@@ -933,7 +1229,7 @@ cat code.py | gemini -p "Review this code" --output-format stream-json
 | Resume flag         | `resume <thread_id>`     | `--resume <session_id>`               |
 | Session ID source   | `thread.started` event   | `init` event                          |
 | Stdin format        | Plain text               | Plain text                            |
-| Output format       | JSONL (`--output-jsonl`) | JSONL (`--output-format stream-json`) |
+| Output format       | JSONL (`--json`)         | JSONL (`--output-format stream-json`) |
 
 **Key difference from Claude Code:** Both Codex and Gemini require a new process
 for each user turn, with session state persisted to disk and restored via resume
@@ -943,30 +1239,34 @@ within a single long-lived process.
 ### 5.4 Event Types
 
 ```typescript
+// Current event types (6 total)
 type GeminiStreamEventType =
   | "init"        // Session initialization with session_id and model
   | "message"     // User/assistant message
   | "tool_use"    // Tool invocation request
   | "tool_result" // Tool execution result
-  | "content"     // Text content from model (streaming chunks) - legacy
-  | "tool_call"   // Tool invocation (atomic) - legacy
   | "result"      // Session completion with stats
   | "error"       // Error event
-  | "retry"       // Retry signal on transient failure
 
 // Result status values
 type GeminiResultStatus =
   | "success"    // Completed successfully
   | "error"      // Completed with error
-  | "cancelled"  // User cancelled
 
-// Error codes
-type GeminiErrorCode =
-  | "INVALID_CHUNK"     // Malformed stream data
-  | "EXECUTION_FAILED"  // Tool execution failed
-  | "TIMEOUT"           // Operation timed out
-  | "API_ERROR"         // Backend API error
-  | "RATE_LIMIT"        // Rate limit exceeded
+// Error severity levels
+type GeminiErrorSeverity =
+  | "warning"    // Non-fatal warning (e.g., loop detected)
+  | "error"      // Fatal error
+
+// Tool result status values
+type GeminiToolResultStatus =
+  | "success"    // Tool completed successfully
+  | "error"      // Tool execution failed
+
+// Tool result error types
+type GeminiToolErrorType =
+  | "FILE_NOT_FOUND"       // File not found
+  | "TOOL_EXECUTION_ERROR" // General tool execution error
 ```
 
 ### 5.5 Event Schemas
@@ -1027,26 +1327,6 @@ The first event emitted - contains session_id for multi-turn resume:
 }
 ```
 
-#### Content Event (legacy format, still supported)
-```json
-{
-  "type": "content",
-  "value": "I'll analyze the codebase structure..."
-}
-```
-
-#### Tool Call Event (legacy format, still supported)
-```json
-{
-  "type": "tool_call",
-  "name": "write_file",
-  "args": {
-    "file_path": "./src/auth.ts",
-    "content": "export async function login() { ... }"
-  }
-}
-```
-
 #### Result Event (Success)
 ```json
 {
@@ -1084,23 +1364,15 @@ The first event emitted - contains session_id for multi-turn resume:
 ```json
 {
   "type": "error",
-  "status": "error",
-  "error": {
-    "code": "INVALID_CHUNK",
-    "message": "Stream ended with invalid chunk or missing finish reason"
-  }
+  "timestamp": "2025-12-03T10:00:05.000Z",
+  "severity": "warning",
+  "message": "Loop detected, stopping execution"
 }
 ```
 
-#### Retry Event
-```json
-{
-  "type": "retry",
-  "attempt": 2,
-  "max_attempts": 3,
-  "delay_ms": 1000
-}
-```
+**Note:** The `severity` field indicates the error severity:
+- `"warning"`: Non-fatal warning (e.g., loop detected, max turns exceeded)
+- `"error"`: Fatal error requiring session termination
 
 ### 5.6 Complete Event Flow Example
 
@@ -1266,28 +1538,30 @@ reading session history, the `messages` array must be converted to event types:
 
 ### 6.1 Invocation Comparison
 
-| Action          | Claude Code                      | Codex CLI                          | Gemini CLI                      |
-| --------------- | -------------------------------- | ---------------------------------- | ------------------------------- |
-| **Headless**    | `claude -p "prompt"`             | `codex exec "prompt"`              | `gemini -p "prompt"`            |
-| **Stream JSON** | `--output-format stream-json`    | `--output-jsonl`                   | `--output-format stream-json`   |
-| **Resume**      | `--resume <id>` or `-c`          | `--resume <id>` or `resume --last` | `--resume` or `--resume <id>`   |
-| **YOLO**        | `--dangerously-skip-permissions` | `--full-auto`                      | `-y` / `--yolo`                 |
-| **Allowlist**   | `--allowedTools "Tool1,Tool2"`   | (config only)                      | `--allowed-tools "tool1,tool2"` |
+| Action          | Claude Code                      | Codex CLI                        | Gemini CLI                      |
+| --------------- | -------------------------------- | -------------------------------- | ------------------------------- |
+| **Headless**    | `claude -p "prompt"`             | `codex "prompt"`                 | `gemini -p "prompt"`            |
+| **Stream JSON** | `--output-format stream-json`    | `--json`                         | `--output-format stream-json`   |
+| **Resume**      | `--resume <id>` or `-c`          | `resume <id>` or `resume --last` | `--resume` or `--resume <id>`   |
+| **YOLO**        | `--dangerously-skip-permissions` | `--full-auto`                    | `-y` / `--yolo`                 |
+| **Allowlist**   | `--allowedTools "Tool1,Tool2"`   | (config only)                    | `--allowed-tools "tool1,tool2"` |
 
 ### 6.2 Complete Event Type Catalog
 
-#### Claude Code Events (8 types)
+#### Claude Code Events (10 types)
 
-| Event Type     | Purpose                 | Fields                                | Notes                                |
-| -------------- | ----------------------- | ------------------------------------- | ------------------------------------ |
-| `init`         | Session initialization  | `session_id`, `timestamp`             | First event emitted                  |
-| `message`      | Text content            | `role`, `content[]`, `partial?`       | Supports partial streaming           |
-| `tool_use`     | Tool invocation request | `id`, `name`, `input`                 | Before tool executes                 |
-| `tool_result`  | Tool execution result   | `tool_use_id`, `content`, `is_error`  | After tool completes                 |
-| `result`       | Session completion      | `status`, `session_id`, `duration_ms` | Final event                          |
-| `error`        | Error occurred          | `error.type`, `error.message`         | May occur any time                   |
-| `system`       | System event            | `subtype`, varies by subtype          | Subtypes: `init`, `compact_boundary` |
-| `stream_event` | Raw API delta           | `event_type`, `delta`, `index`        | Only with `--verbose`                |
+| Event Type      | Purpose                 | Fields                                          | Notes                                              |
+| --------------- | ----------------------- | ----------------------------------------------- | -------------------------------------------------- |
+| `system`        | System event            | `subtype`, varies by subtype                    | Subtypes: `init`, `compact_boundary`, `status`, `hook_response` |
+| `user`          | User message            | `message`, `parent_tool_use_id`, `isSynthetic?` | User input or synthetic tool results               |
+| `assistant`     | Assistant message       | `message`, `parent_tool_use_id`, `error?`       | Model responses                                    |
+| `tool_use`      | Tool invocation request | `id`, `name`, `input`                           | Before tool executes (in assistant content)        |
+| `tool_result`   | Tool execution result   | `tool_use_id`, `content`, `is_error`            | After tool completes (in user content)             |
+| `tool_progress` | Tool execution progress | `tool_use_id`, `tool_name`, `elapsed_time_seconds` | Real-time progress updates                      |
+| `result`        | Session completion      | `subtype`, `usage`, `modelUsage`, `permission_denials` | Final event with detailed stats              |
+| `error`         | Error occurred          | `error.type`, `error.message`                   | May occur any time                                 |
+| `stream_event`  | Raw API delta           | `event`, `parent_tool_use_id`                   | With `includePartialMessages`                      |
+| `auth_status`   | Auth state              | `isAuthenticating`, `output[]`, `error?`        | Authentication updates                             |
 
 #### Codex CLI Events (8 types + 8 item types)
 
@@ -1303,26 +1577,31 @@ reading session history, the `messages` array must be converted to event types:
 
 **Item Lifecycle Events:**
 
-| Event Type       | Purpose       | Fields                | Notes                    |
-| ---------------- | ------------- | --------------------- | ------------------------ |
-| `item.started`   | Item begins   | `item_type`           | Start of item processing |
-| `item.updated`   | Item progress | `item_type`, varies   | Streaming updates        |
-| `item.completed` | Item finished | `item_type`, `status` | End of item processing   |
+| Event Type       | Purpose       | Fields                | Notes                       |
+| ---------------- | ------------- | --------------------- | --------------------------- |
+| `item.started`   | Item begins   | `item` object         | Start of item processing    |
+| `item.updated`   | Item progress | `item` object         | Streaming updates           |
+| `item.completed` | Item finished | `item` object         | End of item processing      |
+
+**Item Object Structure:**
+All item events contain a full `item` object with an `id` field for correlation and a `type` field indicating the item type.
 
 **Item Types (8):**
 
-| Item Type           | Purpose           | Key Fields in `item.updated`               |
-| ------------------- | ----------------- | ------------------------------------------ |
-| `agent_message`     | Assistant text    | `content`                                  |
-| `reasoning`         | Chain-of-thought  | `reasoning`, `summary`                     |
-| `command_execution` | Shell command     | `command_line`, `aggregated_output`        |
-| `file_change`       | File modification | `changes[]` with `path`, `before`, `after` |
-| `mcp_tool_call`     | MCP tool          | `tool_name`, `tool_input`, `tool_result`   |
-| `web_search`        | Web search        | `query`, `results[]`                       |
-| `todo_list`         | Task planning     | `items[]` with `task`, `status`            |
-| `error`             | Error item        | `error_type`, `message`, `details`         |
+| Item Type           | Purpose           | Key Fields in `item`                             |
+| ------------------- | ----------------- | ------------------------------------------------ |
+| `agent_message`     | Assistant text    | `text`                                           |
+| `reasoning`         | Chain-of-thought  | `text`                                           |
+| `command_execution` | Shell command     | `command`, `aggregated_output`, `exit_code`, `status` |
+| `file_change`       | File modification | `changes[]` with `path`, `kind`; `status`        |
+| `mcp_tool_call`     | MCP tool          | `server`, `tool`, `arguments`, `result`, `error`, `status` |
+| `web_search`        | Web search        | `query`                                          |
+| `todo_list`         | Task planning     | `items[]` with `text`, `completed`               |
+| `error`             | Error item        | `message`                                        |
 
-#### Gemini CLI Events (9 types)
+**Item Status Values:** `in_progress`, `completed`, `failed`, `declined`, `skipped`
+
+#### Gemini CLI Events (6 types)
 
 | Event Type    | Purpose                  | Fields                                                | Notes                                       |
 | ------------- | ------------------------ | ----------------------------------------------------- | ------------------------------------------- |
@@ -1330,11 +1609,8 @@ reading session history, the `messages` array must be converted to event types:
 | `message`     | User/assistant message   | `role`, `content`, `delta?`, `timestamp`              | Supports streaming via delta flag           |
 | `tool_use`    | Tool invocation request  | `tool_name`, `tool_id`, `parameters`, `timestamp`     | Before tool executes                        |
 | `tool_result` | Tool execution result    | `tool_id`, `status`, `output?`, `error?`, `timestamp` | After tool completes                        |
-| `content`     | Text content (legacy)    | `value`                                               | Streaming text chunks                       |
-| `tool_call`   | Tool invocation (legacy) | `name`, `args`                                        | Atomic (no separate result)                 |
 | `result`      | Session completion       | `status`, `stats`, `timestamp`, `error?`              | Final event                                 |
-| `error`       | Error event              | `error.code`, `error.message`                         | May occur any time                          |
-| `retry`       | Retry signal             | `attempt`, `max_attempts`, `delay_ms`                 | On transient failure                        |
+| `error`       | Error event              | `severity`, `message`, `timestamp`                    | Severity: `warning` or `error`              |
 
 ### 6.3 Comprehensive Event Mapping Matrix
 
@@ -1343,79 +1619,92 @@ This matrix maps every event type across all three CLIs:
 | Semantic Concept           | Claude Code                          | Codex CLI                          | Gemini CLI                        |
 | -------------------------- | ------------------------------------ | ---------------------------------- | --------------------------------- |
 | **Session Lifecycle**      |                                      |                                    |                                   |
-| Session start              | `init`                               | `thread.started`                   | `init`                            |
-| Session end (success)      | `result` (status: success)           | (process exit 0)                   | `result` (status: success)        |
-| Session end (error)        | `result` (status: error)             | `turn.failed`                      | `result` (status: error)          |
-| Session end (cancelled)    | `result` (status: cancelled)         | (SIGTERM)                          | `result` (status: cancelled)      |
+| Session start              | `system` (subtype: init)             | `thread.started`                   | `init`                            |
+| Session end (success)      | `result` (subtype: success)          | (process exit 0)                   | `result` (status: success)        |
+| Session end (error)        | `result` (subtype: error_*)          | `turn.failed`                      | `result` (status: error)          |
 | **Turn Lifecycle**         |                                      |                                    |                                   |
 | Turn start                 | (implicit)                           | `turn.started`                     | (implicit)                        |
 | Turn end                   | (implicit)                           | `turn.completed`                   | (implicit in result)              |
-| Turn failed                | `error`                              | `turn.failed`                      | `error`                           |
+| Turn failed                | `error`                              | `turn.failed`                      | `error` (severity: error)         |
 | **Content Events**         |                                      |                                    |                                   |
-| Assistant text (complete)  | `message` (partial: false)           | `item.completed` (agent_message)   | `content` (final)                 |
-| Assistant text (streaming) | `message` (partial: true)            | `item.updated` (agent_message)     | `content` (incremental)           |
-| User message               | `message` (role: user)               | -                                  | -                                 |
+| Assistant text             | `assistant`                          | `item.*` (agent_message)           | `message` (role: assistant)       |
+| User message               | `user`                               | -                                  | `message` (role: user)            |
+| Streaming text             | `stream_event`                       | `item.updated` (agent_message)     | `message` (delta: true)           |
 | **Tool Lifecycle**         |                                      |                                    |                                   |
-| Tool invocation start      | `tool_use`                           | `item.started` (command/mcp/file)  | `tool_call`                       |
-| Tool progress/output       | -                                    | `item.updated`                     | -                                 |
-| Tool completed (success)   | `tool_result` (is_error: false)      | `item.completed` (status: success) | (implicit in next content)        |
-| Tool completed (error)     | `tool_result` (is_error: true)       | `item.completed` (status: failed)  | (error in result)                 |
+| Tool invocation start      | `tool_use` (in assistant content)    | `item.started` (command/mcp/file)  | `tool_use`                        |
+| Tool progress/output       | `tool_progress`                      | `item.updated`                     | -                                 |
+| Tool completed (success)   | `tool_result` (in user content)      | `item.completed` (status: completed) | `tool_result` (status: success) |
+| Tool completed (error)     | `tool_result` (is_error: true)       | `item.completed` (status: failed)  | `tool_result` (status: error)     |
+| Tool declined              | (permission_denials in result)       | `item.completed` (status: declined) | -                                |
 | **Specific Tool Types**    |                                      |                                    |                                   |
-| Shell command              | `tool_use` (name: Bash)              | `item.*` (command_execution)       | `tool_call` (name: run_shell)     |
-| File read                  | `tool_use` (name: Read)              | `item.*` (command_execution)       | `tool_call` (name: read_file)     |
-| File write/edit            | `tool_use` (name: Edit/Write)        | `item.*` (file_change)             | `tool_call` (name: write_file)    |
-| MCP tool                   | `tool_use` (name: mcp__*)            | `item.*` (mcp_tool_call)           | `tool_call` (MCP name)            |
-| Web search                 | `tool_use` (name: WebSearch)         | `item.*` (web_search)              | `tool_call` (name: google_search) |
+| Shell command              | `tool_use` (name: Bash)              | `item.*` (command_execution)       | `tool_use` (tool_name: Bash)      |
+| File read                  | `tool_use` (name: Read)              | `item.*` (command_execution)       | `tool_use` (tool_name: read_file) |
+| File write/edit            | `tool_use` (name: Edit/Write)        | `item.*` (file_change)             | `tool_use` (tool_name: write_file)|
+| MCP tool                   | `tool_use` (name: mcp__*)            | `item.*` (mcp_tool_call)           | `tool_use` (MCP name)             |
+| Web search                 | `tool_use` (name: WebSearch)         | `item.*` (web_search)              | `tool_use` (tool_name: google_search) |
 | **Reasoning/Thinking**     |                                      |                                    |                                   |
 | Visible reasoning          | -                                    | `item.*` (reasoning)               | -                                 |
-| Internal thinking          | (not exposed)                        | (summary in reasoning)             | (not exposed)                     |
+| Internal thinking          | (not exposed)                        | (text in reasoning)                | (not exposed)                     |
 | **Task Management**        |                                      |                                    |                                   |
 | Todo list                  | `tool_use` (name: TodoWrite)         | `item.*` (todo_list)               | -                                 |
 | **System Events**          |                                      |                                    |                                   |
 | System init info           | `system` (subtype: init)             | -                                  | -                                 |
 | Context compaction         | `system` (subtype: compact_boundary) | -                                  | -                                 |
-| Verbose/debug              | `stream_event` (--verbose)           | -                                  | (--debug to stderr)               |
+| Status updates             | `system` (subtype: status)           | -                                  | -                                 |
+| Hook responses             | `system` (subtype: hook_response)    | -                                  | -                                 |
+| Auth status                | `auth_status`                        | -                                  | -                                 |
+| Verbose/debug              | `stream_event`                       | -                                  | (--debug to stderr)               |
 | **Error Handling**         |                                      |                                    |                                   |
-| Session error              | `error`                              | `error`                            | `error`                           |
-| Tool error                 | `tool_result` (is_error: true)       | `item.*` (error item_type)         | `result` (status: error)          |
-| Retry signal               | -                                    | -                                  | `retry`                           |
+| Session error              | `error`                              | `error`                            | `error` (severity: error)         |
+| Warning                    | -                                    | -                                  | `error` (severity: warning)       |
+| Tool error                 | `tool_result` (is_error: true)       | `item.*` (error item_type)         | `tool_result` (status: error)     |
 | **Token/Usage Tracking**   |                                      |                                    |                                   |
 | Per-turn usage             | -                                    | `turn.completed.usage`             | -                                 |
-| Final usage                | `result.duration_ms`                 | `turn.completed.usage`             | `result.stats`                    |
+| Final usage                | `result.usage`, `result.modelUsage`  | `turn.completed.usage`             | `result.stats`                    |
+| Cost tracking              | `result.total_cost_usd`              | -                                  | -                                 |
 | **Permission Events**      |                                      |                                    |                                   |
-| Permission request         | (via MCP tool call)                  | -                                  | -                                 |
-| Permission response        | (via MCP tool result)                | -                                  | -                                 |
+| Permission request         | (via MCP tool call / canUseTool)     | -                                  | -                                 |
+| Permission denials         | `result.permission_denials`          | -                                  | -                                 |
 
 ### 6.4 Permission Mode Mapping
 
-| Behavior                      | Claude Code                      | Codex CLI          | Gemini CLI  |
-| ----------------------------- | -------------------------------- | ------------------ | ----------- |
-| **Ask for all**               | Default                          | `untrusted` / `-a` | `default`   |
-| **Ask dangerous only**        | (via hooks)                      | `on-request`       | -           |
-| **Auto file edits**           | `--allowedTools "Edit,Write"`    | -                  | `auto_edit` |
-| **Auto all**                  | `--dangerously-skip-permissions` | `--full-auto`      | `--yolo`    |
-| **Sandbox**                   | -                                | `workspace-write`  | `--sandbox` |
-| **MCP Permission Delegation** | `--permission-prompt-tool`       | -                  | -           |
+| Behavior                      | Claude Code                          | Codex CLI          | Gemini CLI  |
+| ----------------------------- | ------------------------------------ | ------------------ | ----------- |
+| **Ask for all**               | `permissionMode: "default"`          | `untrusted` / `-a` | `default`   |
+| **Ask dangerous only**        | (via hooks)                          | `on-request`       | -           |
+| **Auto file edits**           | `permissionMode: "acceptEdits"`      | -                  | `auto_edit` |
+| **Auto all**                  | `permissionMode: "bypassPermissions"` | `--full-auto`     | `--yolo`    |
+| **Plan only (no execution)**  | `permissionMode: "plan"`             | -                  | -           |
+| **Deny if not pre-approved**  | `permissionMode: "dontAsk"`          | -                  | -           |
+| **CLI YOLO**                  | `--dangerously-skip-permissions`     | `--full-auto`      | `-y`        |
+| **Sandbox**                   | (via SDK sandbox settings)           | `workspace-write`  | `--sandbox` |
+| **MCP Permission Delegation** | `--permission-prompt-tool`           | -                  | -           |
+| **SDK Permission Callback**   | `canUseTool` callback                | -                  | -           |
 
 ### 6.5 Feature Comparison
 
 | Feature                   | Claude Code                  | Codex CLI                  | Gemini CLI         |
 | ------------------------- | ---------------------------- | -------------------------- | ------------------ |
-| **Streaming granularity** | Per-message                  | Per-item-update            | Per-content-chunk  |
-| **Tool lifecycle events** | 2 (use/result)               | 3 (start/update/complete)  | 1 (atomic call)    |
+| **Streaming granularity** | Per-message                  | Per-item-update            | Per-message        |
+| **Tool lifecycle events** | 3 (use/progress/result)      | 3 (start/update/complete)  | 2 (use/result)     |
 | **Reasoning visibility**  | No                           | Yes (`reasoning` item)     | No                 |
-| **Token tracking**        | No                           | Yes (turn.completed.usage) | Yes (result.stats) |
-| **Structured output**     | `--json-schema`              | `--output-schema`          | No                 |
-| **Partial streaming**     | `--include-partial-messages` | Built-in (item.updated)    | Built-in           |
+| **Token tracking**        | Yes (result.usage)           | Yes (turn.completed.usage) | Yes (result.stats) |
+| **Cost tracking**         | Yes (total_cost_usd)         | No                         | No                 |
+| **Per-model usage**       | Yes (modelUsage)             | No                         | No                 |
+| **Structured output**     | `outputFormat` schema        | `--output-schema`          | No                 |
+| **Partial streaming**     | `includePartialMessages`     | Built-in (item.updated)    | Built-in (delta)   |
 | **MCP integration**       | Yes                          | Yes                        | Yes                |
 | **Git checkpointing**     | No                           | No                         | Yes                |
-| **Permission delegation** | MCP tool                     | Config only                | Config only        |
+| **Permission delegation** | MCP tool + canUseTool        | Config only                | Config only        |
+| **Session forking**       | Yes (forkSession)            | No                         | No                 |
+| **Hook system**           | Yes (PreToolUse, etc.)       | No                         | No                 |
+| **Beta features**         | Yes (betas array)            | No                         | No                 |
 
 ### 6.6 Event Flow Patterns
 
 **Claude Code:**
 ```
-init → message* → (tool_use → tool_result)* → message* → result
+system.init → user → assistant → (tool_progress)* → user(synthetic) → assistant* → result
 ```
 
 **Codex CLI:**
@@ -1427,13 +1716,13 @@ turn.completed
 
 **Gemini CLI:**
 ```
-init → message* → (tool_use → tool_result)* → message* → result
+init → message(user) → (tool_use → tool_result)* → message(assistant)* → result
 ```
 
-**Note:** Gemini CLI's event flow pattern is now nearly identical to Claude
-Code's. The key difference is the process lifecycle: Claude Code maintains a
-long-lived bidirectional process, while Gemini uses process-per-turn with
-session persistence (like Codex).
+**Key Differences:**
+- **Claude Code:** Long-lived bidirectional JSONL process with user/assistant message events
+- **Codex CLI:** Process-per-turn with item-based granularity
+- **Gemini CLI:** Process-per-turn with message-based events (similar to Claude but no bidirectional input)
 
 ---
 
@@ -1954,65 +2243,76 @@ class GeminiAdapter implements ProtocolAdapter {
   "title": "ClaudeStreamEvent",
   "oneOf": [
     {
-      "type": "object",
+      "description": "System event (init, compact_boundary, status, hook_response)",
       "properties": {
-        "type": { "const": "init" },
+        "type": { "const": "system" },
+        "subtype": { "enum": ["init", "compact_boundary", "status", "hook_response"] },
+        "uuid": { "type": "string" },
         "session_id": { "type": "string" },
-        "timestamp": { "type": "string", "format": "date-time" }
+        "claude_code_version": { "type": "string" },
+        "cwd": { "type": "string" },
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "model": { "type": "string" },
+        "permissionMode": { "enum": ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"] }
       },
-      "required": ["type", "session_id"]
+      "required": ["type", "subtype", "session_id"]
     },
     {
-      "type": "object",
+      "description": "User message",
       "properties": {
-        "type": { "const": "message" },
-        "role": { "enum": ["assistant", "user"] },
-        "content": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "type": { "enum": ["text", "tool_use"] },
-              "text": { "type": "string" }
-            }
-          }
-        },
-        "partial": { "type": "boolean" }
+        "type": { "const": "user" },
+        "uuid": { "type": "string" },
+        "session_id": { "type": "string" },
+        "message": { "type": "object" },
+        "parent_tool_use_id": { "type": ["string", "null"] },
+        "isSynthetic": { "type": "boolean" },
+        "isReplay": { "type": "boolean" }
       },
-      "required": ["type", "role", "content"]
+      "required": ["type", "session_id", "message"]
     },
     {
-      "type": "object",
+      "description": "Assistant message",
       "properties": {
-        "type": { "const": "tool_use" },
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "input": { "type": "object" }
+        "type": { "const": "assistant" },
+        "uuid": { "type": "string" },
+        "session_id": { "type": "string" },
+        "message": { "type": "object" },
+        "parent_tool_use_id": { "type": ["string", "null"] },
+        "error": { "enum": ["authentication_failed", "billing_error", "rate_limit", "invalid_request", "server_error", "unknown", null] }
       },
-      "required": ["type", "id", "name", "input"]
+      "required": ["type", "session_id", "message"]
     },
     {
-      "type": "object",
+      "description": "Tool progress",
       "properties": {
-        "type": { "const": "tool_result" },
+        "type": { "const": "tool_progress" },
+        "uuid": { "type": "string" },
+        "session_id": { "type": "string" },
         "tool_use_id": { "type": "string" },
-        "content": { "type": "string" },
-        "is_error": { "type": "boolean" }
+        "tool_name": { "type": "string" },
+        "elapsed_time_seconds": { "type": "number" }
       },
-      "required": ["type", "tool_use_id"]
+      "required": ["type", "session_id", "tool_use_id", "tool_name"]
     },
     {
-      "type": "object",
+      "description": "Result (success or error)",
       "properties": {
         "type": { "const": "result" },
-        "status": { "enum": ["success", "error"] },
+        "subtype": { "enum": ["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"] },
+        "uuid": { "type": "string" },
         "session_id": { "type": "string" },
-        "duration_ms": { "type": "integer" }
+        "duration_ms": { "type": "integer" },
+        "is_error": { "type": "boolean" },
+        "num_turns": { "type": "integer" },
+        "total_cost_usd": { "type": "number" },
+        "usage": { "type": "object" },
+        "modelUsage": { "type": "object" },
+        "permission_denials": { "type": "array" }
       },
-      "required": ["type", "status"]
+      "required": ["type", "subtype", "session_id"]
     },
     {
-      "type": "object",
+      "description": "Error event",
       "properties": {
         "type": { "const": "error" },
         "error": {
@@ -2026,34 +2326,27 @@ class GeminiAdapter implements ProtocolAdapter {
       "required": ["type", "error"]
     },
     {
-      "type": "object",
-      "properties": {
-        "type": { "const": "system" },
-        "subtype": { "enum": ["init", "compact_boundary"] },
-        "version": { "type": "string" },
-        "cwd": { "type": "string" },
-        "tools": { "type": "array", "items": { "type": "string" } },
-        "compact_metadata": {
-          "type": "object",
-          "properties": {
-            "trigger": { "type": "string" },
-            "pre_tokens": { "type": "integer" },
-            "post_tokens": { "type": "integer" },
-            "summary_tokens": { "type": "integer" }
-          }
-        }
-      },
-      "required": ["type", "subtype"]
-    },
-    {
-      "type": "object",
+      "description": "Stream event (partial messages)",
       "properties": {
         "type": { "const": "stream_event" },
-        "event_type": { "type": "string" },
-        "index": { "type": "integer" },
-        "delta": { "type": "object" }
+        "uuid": { "type": "string" },
+        "session_id": { "type": "string" },
+        "event": { "type": "object" },
+        "parent_tool_use_id": { "type": ["string", "null"] }
       },
-      "required": ["type", "event_type"]
+      "required": ["type", "session_id", "event"]
+    },
+    {
+      "description": "Auth status",
+      "properties": {
+        "type": { "const": "auth_status" },
+        "uuid": { "type": "string" },
+        "session_id": { "type": "string" },
+        "isAuthenticating": { "type": "boolean" },
+        "output": { "type": "array", "items": { "type": "string" } },
+        "error": { "type": ["string", "null"] }
+      },
+      "required": ["type", "session_id", "isAuthenticating"]
     }
   ]
 }
@@ -2065,8 +2358,25 @@ class GeminiAdapter implements ProtocolAdapter {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://agent-protocol.dev/schemas/codex-event.json",
   "title": "CodexStreamEvent",
+  "$defs": {
+    "Item": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string", "description": "Unique item identifier" },
+        "type": { "enum": ["agent_message", "command_execution", "file_edit", "input_request"] },
+        "status": { "enum": ["in_progress", "completed", "failed", "declined"] },
+        "text": { "type": "string" },
+        "command": { "type": "string" },
+        "file_path": { "type": "string" },
+        "diff": { "type": "string" },
+        "exit_code": { "type": "integer" }
+      }
+    }
+  },
   "oneOf": [
     {
+      "description": "Thread started - contains thread_id for multi-turn resume",
       "properties": {
         "type": { "const": "thread.started" },
         "thread_id": { "type": "string" }
@@ -2074,10 +2384,12 @@ class GeminiAdapter implements ProtocolAdapter {
       "required": ["type", "thread_id"]
     },
     {
+      "description": "Turn started",
       "properties": { "type": { "const": "turn.started" } },
       "required": ["type"]
     },
     {
+      "description": "Turn completed with token usage",
       "properties": {
         "type": { "const": "turn.completed" },
         "usage": {
@@ -2085,7 +2397,8 @@ class GeminiAdapter implements ProtocolAdapter {
           "properties": {
             "input_tokens": { "type": "integer" },
             "cached_input_tokens": { "type": "integer" },
-            "output_tokens": { "type": "integer" }
+            "output_tokens": { "type": "integer" },
+            "reasoning_tokens": { "type": "integer" }
           },
           "required": ["input_tokens", "output_tokens"]
         }
@@ -2093,6 +2406,7 @@ class GeminiAdapter implements ProtocolAdapter {
       "required": ["type", "usage"]
     },
     {
+      "description": "Turn failed with error",
       "properties": {
         "type": { "const": "turn.failed" },
         "error": {
@@ -2104,28 +2418,31 @@ class GeminiAdapter implements ProtocolAdapter {
       "required": ["type", "error"]
     },
     {
+      "description": "Item started - contains full item object with id",
       "properties": {
         "type": { "const": "item.started" },
-        "item_type": { "type": "string" }
+        "item": { "$ref": "#/$defs/Item" }
       },
-      "required": ["type", "item_type"]
+      "required": ["type", "item"]
     },
     {
+      "description": "Item updated - streaming updates",
       "properties": {
         "type": { "const": "item.updated" },
-        "item_type": { "type": "string" }
+        "item": { "$ref": "#/$defs/Item" }
       },
-      "required": ["type", "item_type"]
+      "required": ["type", "item"]
     },
     {
+      "description": "Item completed with status",
       "properties": {
         "type": { "const": "item.completed" },
-        "item_type": { "type": "string" },
-        "status": { "enum": ["success", "failed"] }
+        "item": { "$ref": "#/$defs/Item" }
       },
-      "required": ["type", "item_type", "status"]
+      "required": ["type", "item"]
     },
     {
+      "description": "Error event",
       "properties": {
         "type": { "const": "error" },
         "message": { "type": "string" }
@@ -2194,33 +2511,19 @@ class GeminiAdapter implements ProtocolAdapter {
       "required": ["type", "tool_id", "status"]
     },
     {
-      "description": "Text content (legacy format)",
-      "properties": {
-        "type": { "const": "content" },
-        "value": { "type": "string" }
-      },
-      "required": ["type", "value"]
-    },
-    {
-      "description": "Tool call (legacy format)",
-      "properties": {
-        "type": { "const": "tool_call" },
-        "name": { "type": "string" },
-        "args": { "type": "object" }
-      },
-      "required": ["type", "name", "args"]
-    },
-    {
       "description": "Session completion",
       "properties": {
         "type": { "const": "result" },
-        "status": { "enum": ["success", "error", "cancelled"] },
+        "status": { "enum": ["success", "error"] },
         "stats": {
-          "type": "object",
+          "type": ["object", "null"],
           "properties": {
             "total_tokens": { "type": "integer" },
             "input_tokens": { "type": "integer" },
             "output_tokens": { "type": "integer" },
+            "thought_tokens": { "type": "integer" },
+            "cache_tokens": { "type": "integer" },
+            "tool_tokens": { "type": "integer" },
             "duration_ms": { "type": "integer" },
             "tool_calls": { "type": "integer" }
           }
@@ -2231,28 +2534,14 @@ class GeminiAdapter implements ProtocolAdapter {
       "required": ["type", "status"]
     },
     {
-      "description": "Error event",
+      "description": "Error event with severity",
       "properties": {
         "type": { "const": "error" },
-        "error": {
-          "type": "object",
-          "properties": {
-            "code": { "type": "string" },
-            "message": { "type": "string" }
-          }
-        }
+        "timestamp": { "type": "string", "format": "date-time" },
+        "severity": { "enum": ["warning", "error"] },
+        "message": { "type": "string" }
       },
-      "required": ["type", "error"]
-    },
-    {
-      "description": "Retry signal on transient failure",
-      "properties": {
-        "type": { "const": "retry" },
-        "attempt": { "type": "integer" },
-        "max_attempts": { "type": "integer" },
-        "delay_ms": { "type": "integer" }
-      },
-      "required": ["type", "attempt"]
+      "required": ["type", "severity", "message"]
     }
   ]
 }
@@ -2490,4 +2779,4 @@ npx @google/gemini-cli
 
 ---
 
-*End of Specification v3.0.0*
+*End of Specification v3.1.0*
