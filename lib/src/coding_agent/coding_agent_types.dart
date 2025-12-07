@@ -68,3 +68,66 @@ enum CodingAgentTurnStatus {
   /// Turn was cancelled by user
   cancelled,
 }
+
+/// Request for tool execution approval
+class ToolApprovalRequest {
+  /// Unique ID for this approval request
+  final String id;
+
+  /// Tool name (e.g., 'bash', 'write', 'read')
+  final String toolName;
+
+  /// Human-readable description of the action
+  final String description;
+
+  /// Tool input/arguments
+  final Map<String, dynamic>? input;
+
+  /// Command to be executed (for shell actions)
+  final String? command;
+
+  /// File path (for file operations)
+  final String? filePath;
+
+  ToolApprovalRequest({
+    required this.id,
+    required this.toolName,
+    required this.description,
+    this.input,
+    this.command,
+    this.filePath,
+  });
+}
+
+/// Decision for a tool approval request
+enum ToolApprovalDecision {
+  /// Allow this specific action
+  allow,
+
+  /// Deny this specific action
+  deny,
+
+  /// Allow this action and all future similar actions
+  allowAlways,
+
+  /// Deny this action and all future similar actions
+  denyAlways,
+}
+
+/// Response to a tool approval request
+class ToolApprovalResponse {
+  /// The decision for this approval
+  final ToolApprovalDecision decision;
+
+  /// Optional message to include with the response
+  final String? message;
+
+  ToolApprovalResponse({required this.decision, this.message});
+}
+
+/// Handler for tool execution approval requests
+///
+/// Called when an agent needs approval for a tool execution.
+/// Return a [ToolApprovalResponse] with the decision.
+typedef ToolApprovalHandler =
+    Future<ToolApprovalResponse> Function(ToolApprovalRequest request);

@@ -43,7 +43,10 @@ class GeminiCodingAgent implements CodingAgent {
   @override
   Future<CodingAgentSession> createSession({
     required String projectDirectory,
+    ToolApprovalHandler? approvalHandler,
   }) async {
+    // Note: Gemini does not support interactive approval handling.
+    // The approvalHandler parameter is ignored.
     return _GeminiCodingAgentSession(
       adapter: _adapter,
       config: _buildConfig(),
@@ -56,7 +59,10 @@ class GeminiCodingAgent implements CodingAgent {
   Future<CodingAgentSession> resumeSession(
     String sessionId, {
     required String projectDirectory,
+    ToolApprovalHandler? approvalHandler,
   }) async {
+    // Note: Gemini does not support interactive approval handling.
+    // The approvalHandler parameter is ignored.
     return _GeminiCodingAgentSession(
       adapter: _adapter,
       config: _buildConfig(),

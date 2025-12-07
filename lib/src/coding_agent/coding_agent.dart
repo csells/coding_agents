@@ -4,14 +4,24 @@ import 'coding_agent_types.dart';
 /// Abstract interface for all coding agents
 abstract class CodingAgent {
   /// Create a new session in the given project directory
+  ///
+  /// [approvalHandler] is an optional callback for tool execution approval.
+  /// When provided, the agent will invoke this callback when a tool requires
+  /// approval. Not all agents support approval handling (e.g., Gemini does not).
   Future<CodingAgentSession> createSession({
     required String projectDirectory,
+    ToolApprovalHandler? approvalHandler,
   });
 
   /// Resume an existing session by ID
+  ///
+  /// [approvalHandler] is an optional callback for tool execution approval.
+  /// When provided, the agent will invoke this callback when a tool requires
+  /// approval. Not all agents support approval handling (e.g., Gemini does not).
   Future<CodingAgentSession> resumeSession(
     String sessionId, {
     required String projectDirectory,
+    ToolApprovalHandler? approvalHandler,
   });
 
   /// List available sessions for the project directory
