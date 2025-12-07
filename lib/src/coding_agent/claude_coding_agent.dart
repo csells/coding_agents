@@ -9,11 +9,11 @@ import 'coding_agent_types.dart';
 class ClaudeCodingAgent implements CodingAgent {
   final ClaudeCodeCliAdapter _adapter = ClaudeCodeCliAdapter();
 
-  /// Permission mode for tool execution
+  /// Permission mode for tool execution (when no approvalHandler is provided)
+  ///
+  /// If an [approvalHandler] is passed to [createSession]/[resumeSession],
+  /// the permission mode will be set to [ClaudePermissionMode.delegate].
   final ClaudePermissionMode permissionMode;
-
-  /// Handler for permission requests (required for delegate mode)
-  final ClaudePermissionHandler? permissionHandler;
 
   /// Model to use (e.g., 'claude-sonnet-4-5-20250929')
   final String? model;
@@ -35,40 +35,78 @@ class ClaudeCodingAgent implements CodingAgent {
 
   ClaudeCodingAgent({
     this.permissionMode = ClaudePermissionMode.defaultMode,
-    this.permissionHandler,
     this.model,
     this.systemPrompt,
     this.appendSystemPrompt,
     this.maxTurns,
     this.allowedTools,
     this.disallowedTools,
-  }) {
-    if (permissionMode == ClaudePermissionMode.delegate &&
-        permissionHandler == null) {
-      throw ArgumentError(
-        'permissionHandler is required when using delegate permission mode',
+  });
+
+  ClaudeSessionConfig _buildConfig(ToolApprovalHandler? approvalHandler) {
+    // If an approval handler is provided, use delegate mode with adapter
+    if (approvalHandler != null) {
+      return ClaudeSessionConfig(
+        permissionMode: ClaudePermissionMode.delegate,
+        permissionHandler: _wrapApprovalHandler(approvalHandler),
+        model: model,
+        systemPrompt: systemPrompt,
+        appendSystemPrompt: appendSystemPrompt,
+        maxTurns: maxTurns,
+        allowedTools: allowedTools,
+        disallowedTools: disallowedTools,
       );
     }
+
+    return ClaudeSessionConfig(
+      permissionMode: permissionMode,
+      model: model,
+      systemPrompt: systemPrompt,
+      appendSystemPrompt: appendSystemPrompt,
+      maxTurns: maxTurns,
+      allowedTools: allowedTools,
+      disallowedTools: disallowedTools,
+    );
   }
 
-  ClaudeSessionConfig _buildConfig() => ClaudeSessionConfig(
-    permissionMode: permissionMode,
-    permissionHandler: permissionHandler,
-    model: model,
-    systemPrompt: systemPrompt,
-    appendSystemPrompt: appendSystemPrompt,
-    maxTurns: maxTurns,
-    allowedTools: allowedTools,
-    disallowedTools: disallowedTools,
-  );
+  /// Wrap unified ToolApprovalHandler as ClaudePermissionHandler
+  ClaudePermissionHandler _wrapApprovalHandler(ToolApprovalHandler handler) {
+    return (ClaudeToolPermissionRequest request) async {
+      // Convert Claude request to unified request
+      final unifiedRequest = ToolApprovalRequest(
+        id: '${request.sessionId}_${request.turnId}_${request.toolName}',
+        toolName: request.toolName,
+        description: 'Tool: ${request.toolName}',
+        input: request.toolInput,
+        command: request.toolInput['command'] as String?,
+        filePath: request.toolInput['file_path'] as String? ??
+            request.toolInput['path'] as String?,
+      );
+
+      // Get unified response
+      final unifiedResponse = await handler(unifiedRequest);
+
+      // Convert to Claude response
+      return ClaudeToolPermissionResponse(
+        behavior: switch (unifiedResponse.decision) {
+          ToolApprovalDecision.allow => ClaudePermissionBehavior.allow,
+          ToolApprovalDecision.deny => ClaudePermissionBehavior.deny,
+          ToolApprovalDecision.allowAlways => ClaudePermissionBehavior.allowAlways,
+          ToolApprovalDecision.denyAlways => ClaudePermissionBehavior.denyAlways,
+        },
+        message: unifiedResponse.message,
+      );
+    };
+  }
 
   @override
   Future<CodingAgentSession> createSession({
     required String projectDirectory,
+    ToolApprovalHandler? approvalHandler,
   }) async {
     return _ClaudeCodingAgentSession(
       adapter: _adapter,
-      config: _buildConfig(),
+      config: _buildConfig(approvalHandler),
       projectDirectory: projectDirectory,
       existingSessionId: null,
     );
@@ -78,10 +116,11 @@ class ClaudeCodingAgent implements CodingAgent {
   Future<CodingAgentSession> resumeSession(
     String sessionId, {
     required String projectDirectory,
+    ToolApprovalHandler? approvalHandler,
   }) async {
     return _ClaudeCodingAgentSession(
       adapter: _adapter,
-      config: _buildConfig(),
+      config: _buildConfig(approvalHandler),
       projectDirectory: projectDirectory,
       existingSessionId: sessionId,
     );

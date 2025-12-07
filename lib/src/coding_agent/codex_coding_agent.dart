@@ -9,7 +9,7 @@ import 'coding_agent_types.dart';
 class CodexCodingAgent implements CodingAgent {
   final CodexCliAdapter _adapter = CodexCliAdapter();
 
-  /// Approval policy for tool executions
+  /// Approval policy for tool executions (when no approvalHandler is provided)
   final CodexApprovalPolicy approvalPolicy;
 
   /// Sandbox mode for file system access
@@ -44,24 +44,58 @@ class CodexCodingAgent implements CodingAgent {
     this.configOverrides,
   });
 
-  CodexSessionConfig _buildConfig() => CodexSessionConfig(
-    approvalPolicy: approvalPolicy,
-    sandboxMode: sandboxMode,
-    fullAuto: fullAuto,
-    dangerouslyBypassAll: dangerouslyBypassAll,
-    model: model,
-    enableWebSearch: enableWebSearch,
-    environment: environment,
-    configOverrides: configOverrides,
-  );
+  CodexSessionConfig _buildConfig(ToolApprovalHandler? approvalHandler) =>
+      CodexSessionConfig(
+        approvalPolicy: approvalPolicy,
+        sandboxMode: sandboxMode,
+        approvalHandler: approvalHandler != null
+            ? _wrapApprovalHandler(approvalHandler)
+            : null,
+        fullAuto: fullAuto,
+        dangerouslyBypassAll: dangerouslyBypassAll,
+        model: model,
+        enableWebSearch: enableWebSearch,
+        environment: environment,
+        configOverrides: configOverrides,
+      );
+
+  /// Wrap unified ToolApprovalHandler as CodexApprovalHandler
+  CodexApprovalHandler _wrapApprovalHandler(ToolApprovalHandler handler) {
+    return (CodexApprovalRequest request) async {
+      // Convert Codex request to unified request
+      final unifiedRequest = ToolApprovalRequest(
+        id: request.id,
+        toolName: request.toolName ?? request.actionType,
+        description: request.description,
+        input: request.toolInput,
+        command: request.command,
+        filePath: request.filePath,
+      );
+
+      // Get unified response
+      final unifiedResponse = await handler(unifiedRequest);
+
+      // Convert to Codex response
+      return CodexApprovalResponse(
+        decision: switch (unifiedResponse.decision) {
+          ToolApprovalDecision.allow => CodexApprovalDecision.allow,
+          ToolApprovalDecision.deny => CodexApprovalDecision.deny,
+          ToolApprovalDecision.allowAlways => CodexApprovalDecision.allowAlways,
+          ToolApprovalDecision.denyAlways => CodexApprovalDecision.denyAlways,
+        },
+        message: unifiedResponse.message,
+      );
+    };
+  }
 
   @override
   Future<CodingAgentSession> createSession({
     required String projectDirectory,
+    ToolApprovalHandler? approvalHandler,
   }) async {
     return _CodexCodingAgentSession(
       adapter: _adapter,
-      config: _buildConfig(),
+      config: _buildConfig(approvalHandler),
       projectDirectory: projectDirectory,
       existingSessionId: null,
     );
@@ -71,10 +105,11 @@ class CodexCodingAgent implements CodingAgent {
   Future<CodingAgentSession> resumeSession(
     String sessionId, {
     required String projectDirectory,
+    ToolApprovalHandler? approvalHandler,
   }) async {
     return _CodexCodingAgentSession(
       adapter: _adapter,
-      config: _buildConfig(),
+      config: _buildConfig(approvalHandler),
       projectDirectory: projectDirectory,
       existingSessionId: sessionId,
     );
@@ -285,6 +320,23 @@ class _CodexCodingAgentSession implements CodingAgentSession {
             turnId: turnId,
             timestamp: event.timestamp,
             message: event.message,
+          ),
+        );
+
+      case CodexApprovalRequiredEvent():
+        // Approval is handled by the callback in the session,
+        // but emit as unknown event for visibility
+        _eventController.add(
+          CodingAgentUnknownEvent(
+            sessionId: sid,
+            turnId: turnId,
+            timestamp: event.timestamp,
+            originalType: 'codex_approval_required',
+            data: {
+              'id': event.request.id,
+              'action_type': event.request.actionType,
+              'description': event.request.description,
+            },
           ),
         );
 
@@ -580,6 +632,21 @@ class _CodexCodingAgentSession implements CodingAgentSession {
             turnId: turnId,
             timestamp: event.timestamp,
             message: event.message,
+          ),
+        );
+
+      case CodexApprovalRequiredEvent():
+        events.add(
+          CodingAgentUnknownEvent(
+            sessionId: sid,
+            turnId: turnId,
+            timestamp: event.timestamp,
+            originalType: 'codex_approval_required',
+            data: {
+              'id': event.request.id,
+              'action_type': event.request.actionType,
+              'description': event.request.description,
+            },
           ),
         );
 
