@@ -472,39 +472,30 @@ class CodexCliAdapter {
   }
 
   /// Builds command-line arguments for the app-server
+  ///
+  /// The app-server only supports `-c` config overrides, so all settings
+  /// are passed via config key=value pairs.
   List<String> buildAppServerArgs(CodexSessionConfig config) {
     final args = <String>['app-server'];
 
-    // Handle fullAuto mode - skips approval and sandbox args
+    // Handle fullAuto mode - equivalent to approval_policy=on-failure + sandbox_mode=workspace-write
     if (config.fullAuto) {
-      args.add('--full-auto');
+      args.addAll(['-c', 'approval_policy="on-failure"']);
+      args.addAll(['-c', 'sandbox_mode="workspace-write"']);
     } else {
       // Approval policy
-      args.add('-a');
-      args.add(_formatEnumArg(config.approvalPolicy.name));
+      args.addAll(['-c', 'approval_policy="${_formatEnumArg(config.approvalPolicy.name)}"']);
 
       // Sandbox mode
-      args.add('-s');
-      args.add(_formatEnumArg(config.sandboxMode.name));
-    }
-
-    // Dangerous bypass
-    if (config.dangerouslyBypassAll) {
-      args.add('--dangerously-bypass-approvals-and-sandbox');
+      args.addAll(['-c', 'sandbox_mode="${_formatEnumArg(config.sandboxMode.name)}"']);
     }
 
     // Model
     if (config.model != null) {
-      args.add('-m');
-      args.add(config.model!);
+      args.addAll(['-c', 'model="${config.model}"']);
     }
 
-    // Web search
-    if (config.enableWebSearch) {
-      args.add('--search');
-    }
-
-    // Config overrides
+    // Config overrides (raw -c flags from user)
     if (config.configOverrides != null) {
       for (final override in config.configOverrides!) {
         args.add('-c');

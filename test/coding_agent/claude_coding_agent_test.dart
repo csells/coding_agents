@@ -7,7 +7,6 @@ void main() {
       final agent = ClaudeCodingAgent();
 
       expect(agent.permissionMode, equals(ClaudePermissionMode.defaultMode));
-      expect(agent.permissionHandler, isNull);
       expect(agent.model, isNull);
       expect(agent.systemPrompt, isNull);
       expect(agent.appendSystemPrompt, isNull);
@@ -27,34 +26,14 @@ void main() {
         disallowedTools: ['Bash'],
       );
 
-      expect(agent.permissionMode, equals(ClaudePermissionMode.bypassPermissions));
+      expect(
+          agent.permissionMode, equals(ClaudePermissionMode.bypassPermissions));
       expect(agent.model, equals('claude-opus-4-5-20251101'));
       expect(agent.systemPrompt, equals('You are a code reviewer.'));
       expect(agent.appendSystemPrompt, equals('Be concise.'));
       expect(agent.maxTurns, equals(10));
       expect(agent.allowedTools, equals(['Read', 'Write']));
       expect(agent.disallowedTools, equals(['Bash']));
-    });
-
-    test('throws ArgumentError when delegate mode without handler', () {
-      expect(
-        () => ClaudeCodingAgent(
-          permissionMode: ClaudePermissionMode.delegate,
-        ),
-        throwsArgumentError,
-      );
-    });
-
-    test('accepts delegate mode with handler', () {
-      final agent = ClaudeCodingAgent(
-        permissionMode: ClaudePermissionMode.delegate,
-        permissionHandler: (request) async => ClaudeToolPermissionResponse(
-          behavior: ClaudePermissionBehavior.allow,
-        ),
-      );
-
-      expect(agent.permissionMode, equals(ClaudePermissionMode.delegate));
-      expect(agent.permissionHandler, isNotNull);
     });
 
     test('implements CodingAgent interface', () {
@@ -67,10 +46,14 @@ void main() {
   group('ClaudePermissionMode', () {
     test('has all expected values', () {
       expect(ClaudePermissionMode.values, hasLength(4));
-      expect(ClaudePermissionMode.values, contains(ClaudePermissionMode.defaultMode));
-      expect(ClaudePermissionMode.values, contains(ClaudePermissionMode.acceptEdits));
-      expect(ClaudePermissionMode.values, contains(ClaudePermissionMode.bypassPermissions));
-      expect(ClaudePermissionMode.values, contains(ClaudePermissionMode.delegate));
+      expect(ClaudePermissionMode.values,
+          contains(ClaudePermissionMode.defaultMode));
+      expect(ClaudePermissionMode.values,
+          contains(ClaudePermissionMode.acceptEdits));
+      expect(ClaudePermissionMode.values,
+          contains(ClaudePermissionMode.bypassPermissions));
+      expect(
+          ClaudePermissionMode.values, contains(ClaudePermissionMode.delegate));
     });
   });
 }
