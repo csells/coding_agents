@@ -22,26 +22,29 @@ Future<void> main() async {
   final workDir = p.join(Directory.current.path, 'tmp');
   Directory(workDir).createSync(recursive: true);
 
-  final client = ClaudeCodeCliAdapter(cwd: workDir);
+  final client = ClaudeCodeCliAdapter();
 
   // Example 1: Simple single-turn session
   print('=== Example 1: Simple Session ===');
-  await simpleSingleTurn(client);
+  await simpleSingleTurn(client, workDir);
 
   // Example 2: Capture session ID and resume later
   print('\n=== Example 2: Capture and Resume Session ===');
-  final sessionId = await createAndCaptureSession(client);
+  final sessionId = await createAndCaptureSession(client, workDir);
   print('Stored session ID: $sessionId');
   print('(This ID could be persisted to disk/database for later use)\n');
-  await resumeStoredSession(client, sessionId);
+  await resumeStoredSession(client, sessionId, workDir);
 
   // Example 3: List sessions and verify our session is present
   print('\n=== Example 3: List and Verify Sessions ===');
-  await listAndVerifySession(client, sessionId);
+  await listAndVerifySession(client, sessionId, workDir);
 }
 
 /// Simple single-turn session with basic configuration
-Future<void> simpleSingleTurn(ClaudeCodeCliAdapter client) async {
+Future<void> simpleSingleTurn(
+  ClaudeCodeCliAdapter client,
+  String workDir,
+) async {
   final config = ClaudeSessionConfig(
     // Skip permission prompts for automation
     permissionMode: ClaudePermissionMode.bypassPermissions,
@@ -52,6 +55,7 @@ Future<void> simpleSingleTurn(ClaudeCodeCliAdapter client) async {
   final session = await client.createSession(
     'What is 2 + 2? Reply with just the number.',
     config,
+    projectDirectory: workDir,
   );
 
   print('Session ID: ${session.sessionId}');
@@ -82,7 +86,10 @@ Future<void> simpleSingleTurn(ClaudeCodeCliAdapter client) async {
 
 /// Create a session and return the session ID for later resumption.
 /// In a real app, you would persist this ID to disk or database.
-Future<String> createAndCaptureSession(ClaudeCodeCliAdapter client) async {
+Future<String> createAndCaptureSession(
+  ClaudeCodeCliAdapter client,
+  String workDir,
+) async {
   final config = ClaudeSessionConfig(
     permissionMode: ClaudePermissionMode.bypassPermissions,
     maxTurns: 1,
@@ -92,6 +99,7 @@ Future<String> createAndCaptureSession(ClaudeCodeCliAdapter client) async {
   final session = await client.createSession(
     'Remember this code: XYZ123. Just say "OK, I will remember XYZ123".',
     config,
+    projectDirectory: workDir,
   );
 
   // Capture the session ID immediately - this is what you'd store
@@ -117,6 +125,7 @@ Future<String> createAndCaptureSession(ClaudeCodeCliAdapter client) async {
 Future<void> resumeStoredSession(
   ClaudeCodeCliAdapter client,
   String sessionId,
+  String workDir,
 ) async {
   final config = ClaudeSessionConfig(
     permissionMode: ClaudePermissionMode.bypassPermissions,
@@ -128,6 +137,7 @@ Future<void> resumeStoredSession(
     sessionId,
     'What code did I ask you to remember?',
     config,
+    projectDirectory: workDir,
   );
 
   await for (final event in session.events) {
@@ -150,8 +160,9 @@ Future<void> resumeStoredSession(
 Future<void> listAndVerifySession(
   ClaudeCodeCliAdapter client,
   String expectedSessionId,
+  String workDir,
 ) async {
-  final sessions = await client.listSessions();
+  final sessions = await client.listSessions(projectDirectory: workDir);
 
   if (sessions.isEmpty) {
     print('No existing sessions found.');
@@ -175,7 +186,10 @@ Future<void> listAndVerifySession(
 }
 
 /// Example of session cancellation (not run by default)
-Future<void> cancelSessionExample(ClaudeCodeCliAdapter client) async {
+Future<void> cancelSessionExample(
+  ClaudeCodeCliAdapter client,
+  String workDir,
+) async {
   final config = ClaudeSessionConfig(
     permissionMode: ClaudePermissionMode.bypassPermissions,
   );
@@ -183,6 +197,7 @@ Future<void> cancelSessionExample(ClaudeCodeCliAdapter client) async {
   final session = await client.createSession(
     'Count from 1 to 100, one number per line.',
     config,
+    projectDirectory: workDir,
   );
 
   var messageCount = 0;

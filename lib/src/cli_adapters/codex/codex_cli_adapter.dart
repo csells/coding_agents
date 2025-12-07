@@ -19,17 +19,17 @@ class CodexProcessException implements Exception {
 
 /// Client for interacting with Codex CLI
 class CodexCliAdapter {
-  /// Working directory for the Codex process
-  final String cwd;
-
   int _turnCounter = 0;
 
-  CodexCliAdapter({required this.cwd});
+  CodexCliAdapter();
 
-  /// List all sessions
+  /// List all sessions for a project directory
   ///
   /// Codex stores sessions in `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
-  Future<List<CodexSessionInfo>> listSessions() async {
+  /// Only returns sessions that match the given projectDirectory.
+  Future<List<CodexSessionInfo>> listSessions({
+    required String projectDirectory,
+  }) async {
     final sessionsDir = Directory(
       '${Platform.environment['HOME']}/.codex/sessions',
     );
@@ -44,7 +44,8 @@ class CodexCliAdapter {
     await for (final entity in sessionsDir.list(recursive: true)) {
       if (entity is! File || !entity.path.endsWith('.jsonl')) continue;
       final info = await _parseSessionFile(entity);
-      if (info != null) {
+      // Only include sessions that match this adapter's cwd
+      if (info != null && info.cwd == projectDirectory) {
         sessions.add(info);
       }
     }
@@ -57,8 +58,12 @@ class CodexCliAdapter {
   /// Get the full history of events for a session
   ///
   /// Parses the session JSONL file and returns all events in order.
+  /// Only returns history for sessions that match the given projectDirectory.
   /// Throws [CodexProcessException] if the session file is not found.
-  Future<List<CodexEvent>> getSessionHistory(String threadId) async {
+  Future<List<CodexEvent>> getSessionHistory(
+    String threadId, {
+    required String projectDirectory,
+  }) async {
     final sessionsDir = Directory(
       '${Platform.environment['HOME']}/.codex/sessions',
     );
@@ -88,14 +93,18 @@ class CodexCliAdapter {
         if (json['type'] == 'session_meta') {
           final payload = json['payload'] as Map<String, dynamic>?;
           if (payload?['id'] == threadId) {
+            // Verify session belongs to this projectDirectory
+            final sessionCwd = payload?['cwd'] as String?;
+            if (sessionCwd != projectDirectory) {
+              throw CodexProcessException('Session not found: $threadId');
+            }
             sessionFile = entity;
             break;
           }
         }
 
         // Check thread.started event
-        if (json['type'] == 'thread.started' &&
-            json['thread_id'] == threadId) {
+        if (json['type'] == 'thread.started' && json['thread_id'] == threadId) {
           sessionFile = entity;
           break;
         }
@@ -184,6 +193,7 @@ class CodexCliAdapter {
     }
 
     if (threadId == null) return null;
+    if (sessionCwd == null) return null; // Skip sessions without cwd metadata
 
     final stat = await file.stat();
     final lastUpdated = stat.modified;
@@ -193,7 +203,7 @@ class CodexCliAdapter {
       threadId: threadId,
       timestamp: timestamp,
       lastUpdated: lastUpdated,
-      cwd: sessionCwd ?? cwd,
+      cwd: sessionCwd,
       gitBranch: gitBranch,
     );
   }
@@ -204,12 +214,17 @@ class CodexCliAdapter {
   /// Returns a [CodexSession] that provides access to the event stream.
   Future<CodexSession> createSession(
     String prompt,
-    CodexSessionConfig config,
-  ) async {
+    CodexSessionConfig config, {
+    required String projectDirectory,
+  }) async {
     final args = buildInitialArgs(prompt, config);
     final turnId = _turnCounter++;
 
-    final process = await Process.start('codex', args, workingDirectory: cwd);
+    final process = await Process.start(
+      'codex',
+      args,
+      workingDirectory: projectDirectory,
+    );
     final eventController = StreamController<CodexEvent>();
     final bufferedEvents = <CodexEvent>[];
     final stderrBuffer = StringBuffer();
@@ -310,12 +325,17 @@ class CodexCliAdapter {
   Future<CodexSession> resumeSession(
     String threadId,
     String prompt,
-    CodexSessionConfig config,
-  ) async {
+    CodexSessionConfig config, {
+    required String projectDirectory,
+  }) async {
     final args = buildResumeArgs(prompt, threadId, config);
     final turnId = _turnCounter++;
 
-    final process = await Process.start('codex', args, workingDirectory: cwd);
+    final process = await Process.start(
+      'codex',
+      args,
+      workingDirectory: projectDirectory,
+    );
     final eventController = StreamController<CodexEvent>();
     final bufferedEvents = <CodexEvent>[];
     final stderrBuffer = StringBuffer();

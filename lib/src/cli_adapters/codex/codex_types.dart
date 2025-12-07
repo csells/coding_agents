@@ -3,19 +3,10 @@ import 'package:json_annotation/json_annotation.dart';
 part 'codex_types.g.dart';
 
 /// Approval policy for Codex CLI tool executions
-enum CodexApprovalPolicy {
-  onRequest,
-  untrusted,
-  onFailure,
-  never,
-}
+enum CodexApprovalPolicy { onRequest, untrusted, onFailure, never }
 
 /// Sandbox mode for Codex CLI
-enum CodexSandboxMode {
-  readOnly,
-  workspaceWrite,
-  dangerFullAccess,
-}
+enum CodexSandboxMode { readOnly, workspaceWrite, dangerFullAccess }
 
 /// Item types in Codex output
 enum CodexItemType {
@@ -68,22 +59,24 @@ class CodexUsage {
 
   /// Parse from JSON, handling both snake_case (Codex API) and camelCase
   factory CodexUsage.fromJson(Map<String, dynamic> json) => CodexUsage(
-        inputTokens: (json['input_tokens'] as num?)?.toInt() ??
-            (json['inputTokens'] as num?)?.toInt() ??
-            0,
-        outputTokens: (json['output_tokens'] as num?)?.toInt() ??
-            (json['outputTokens'] as num?)?.toInt() ??
-            0,
-        cachedInputTokens: (json['cached_input_tokens'] as num?)?.toInt() ??
-            (json['cachedInputTokens'] as num?)?.toInt(),
-      );
+    inputTokens:
+        (json['input_tokens'] as num?)?.toInt() ??
+        (json['inputTokens'] as num?)?.toInt() ??
+        0,
+    outputTokens:
+        (json['output_tokens'] as num?)?.toInt() ??
+        (json['outputTokens'] as num?)?.toInt() ??
+        0,
+    cachedInputTokens:
+        (json['cached_input_tokens'] as num?)?.toInt() ??
+        (json['cachedInputTokens'] as num?)?.toInt(),
+  );
 
   Map<String, dynamic> toJson() => {
-        'input_tokens': inputTokens,
-        'output_tokens': outputTokens,
-        if (cachedInputTokens != null)
-          'cached_input_tokens': cachedInputTokens,
-      };
+    'input_tokens': inputTokens,
+    'output_tokens': outputTokens,
+    if (cachedInputTokens != null) 'cached_input_tokens': cachedInputTokens,
+  };
 }
 
 /// Base class for Codex output items
@@ -144,11 +137,7 @@ class CodexReasoningItem implements CodexItem {
   @override
   CodexItemType get type => CodexItemType.reasoning;
 
-  CodexReasoningItem({
-    required this.id,
-    this.reasoning,
-    this.summary,
-  });
+  CodexReasoningItem({required this.id, this.reasoning, this.summary});
 
   factory CodexReasoningItem.fromJson(Map<String, dynamic> json) =>
       CodexReasoningItem(

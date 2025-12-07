@@ -23,7 +23,7 @@ void main() {
   });
 
   setUp(() {
-    client = GeminiCliAdapter(cwd: testWorkDir);
+    client = GeminiCliAdapter();
     // Use sandbox mode to prevent Gemini from modifying project files
     config = GeminiSessionConfig(
       approvalMode: GeminiApprovalMode.yolo,
@@ -36,6 +36,7 @@ void main() {
       final session = await client.createSession(
         'Say exactly: "Hello"',
         config,
+        projectDirectory: testWorkDir,
       );
 
       expect(session.sessionId, isNotNull);
@@ -65,6 +66,7 @@ void main() {
       final session = await client.createSession(
         'Respond with exactly: "Test response"',
         config,
+        projectDirectory: testWorkDir,
       );
 
       final assistantMessages = <GeminiMessageEvent>[];
@@ -92,6 +94,7 @@ void main() {
       final session = await client.createSession(
         'Read the file pubspec.yaml and tell me the package name',
         config,
+        projectDirectory: testWorkDir,
       );
 
       final toolUseEvents = <GeminiToolUseEvent>[];
@@ -119,7 +122,11 @@ void main() {
     });
 
     test('result event contains success status and stats', () async {
-      final session = await client.createSession('Say: "Done"', config);
+      final session = await client.createSession(
+        'Say: "Done"',
+        config,
+        projectDirectory: testWorkDir,
+      );
 
       GeminiResultEvent? resultEvent;
 
@@ -145,6 +152,7 @@ void main() {
       final session1 = await client.createSession(
         'Hi! My name is Chris!',
         config,
+        projectDirectory: testWorkDir,
       );
 
       final sessionId = session1.sessionId;
@@ -159,6 +167,7 @@ void main() {
         sessionId,
         'Say my name.',
         config,
+        projectDirectory: testWorkDir,
       );
 
       final responses = <String>[];
@@ -180,7 +189,11 @@ void main() {
     });
 
     test('session events include correct turnId', () async {
-      final session = await client.createSession('Say: "Turn test"', config);
+      final session = await client.createSession(
+        'Say: "Turn test"',
+        config,
+        projectDirectory: testWorkDir,
+      );
 
       final turnIds = <int>{};
 
@@ -207,6 +220,7 @@ void main() {
       final session = await client.createSession(
         'Say: "List test"',
         config,
+        projectDirectory: testWorkDir,
       );
 
       final sessionId = session.sessionId;
@@ -217,14 +231,10 @@ void main() {
       }
 
       // List sessions
-      final sessions = await client.listSessions();
+      final sessions = await client.listSessions(projectDirectory: testWorkDir);
 
       // Verify our session is in the list
-      expect(
-        sessions,
-        isNotEmpty,
-        reason: 'Should have at least one session',
-      );
+      expect(sessions, isNotEmpty, reason: 'Should have at least one session');
       expect(
         sessions.any((s) => s.sessionId == sessionId),
         isTrue,
@@ -233,16 +243,21 @@ void main() {
     });
 
     test('API errors throw exception with error details', () async {
-      // Use an invalid model name to trigger an API error
+      // Use an invalid model name to trigger an API error (404 not found)
       final badConfig = GeminiSessionConfig(
         approvalMode: GeminiApprovalMode.yolo,
         sandbox: true,
         model: 'invalid-model-that-does-not-exist-xyz',
       );
 
-      final session = await client.createSession('Say hello', badConfig);
+      final session = await client.createSession(
+        'Say hello',
+        badConfig,
+        projectDirectory: testWorkDir,
+      );
 
       // Expect exception to be thrown with error details
+      // Gemini CLI outputs: [API Error: [{"error": {"code": 404, "message": "..."}}]]
       expect(
         () async {
           await for (final event in session.events) {
@@ -251,9 +266,13 @@ void main() {
         },
         throwsA(
           isA<GeminiProcessException>().having(
-            (e) => e.message,
+            (e) => e.message.toLowerCase(),
             'message',
-            anyOf(contains('404'), contains('not found')),
+            anyOf(
+              contains('404'),
+              contains('not found'),
+              contains('api error'),
+            ),
           ),
         ),
         reason: 'Exception should contain error details from API',
@@ -271,7 +290,11 @@ void main() {
       // Expect createSession to fail with CLI error details
       expect(
         () async {
-          final session = await client.createSession('Say hello', badConfig);
+          final session = await client.createSession(
+            'Say hello',
+            badConfig,
+            projectDirectory: testWorkDir,
+          );
           await for (final event in session.events) {
             if (event is GeminiResultEvent) break;
           }
@@ -292,7 +315,11 @@ void main() {
       const testPrompt = 'Say exactly: "History test response"';
 
       // Create a session
-      final session = await client.createSession(testPrompt, config);
+      final session = await client.createSession(
+        testPrompt,
+        config,
+        projectDirectory: testWorkDir,
+      );
       final sessionId = session.sessionId;
 
       // Wait for session to complete
@@ -301,14 +328,13 @@ void main() {
       }
 
       // Get session history
-      final history = await client.getSessionHistory(sessionId);
+      final history = await client.getSessionHistory(
+        sessionId,
+        projectDirectory: testWorkDir,
+      );
 
       // Verify history contains expected event types
-      expect(
-        history,
-        isNotEmpty,
-        reason: 'History should not be empty',
-      );
+      expect(history, isNotEmpty, reason: 'History should not be empty');
       expect(
         history.any((e) => e is GeminiInitEvent),
         isTrue,
@@ -325,7 +351,11 @@ void main() {
       const testPrompt = 'Say exactly: "First prompt response"';
 
       // Create a session
-      final session = await client.createSession(testPrompt, config);
+      final session = await client.createSession(
+        testPrompt,
+        config,
+        projectDirectory: testWorkDir,
+      );
       final sessionId = session.sessionId;
 
       // Wait for session to complete
@@ -334,7 +364,10 @@ void main() {
       }
 
       // Get session history
-      final history = await client.getSessionHistory(sessionId);
+      final history = await client.getSessionHistory(
+        sessionId,
+        projectDirectory: testWorkDir,
+      );
 
       // Find message events
       final userMessages = <GeminiMessageEvent>[];
@@ -362,13 +395,45 @@ void main() {
       );
     });
 
+    test('getSessionHistory can be called multiple times', () async {
+      const testPrompt = 'Say exactly: "Idempotency test"';
+
+      // Create a session
+      final session = await client.createSession(
+        testPrompt,
+        config,
+        projectDirectory: testWorkDir,
+      );
+      final sessionId = session.sessionId;
+
+      // Wait for session to complete
+      await for (final event in session.events) {
+        if (event is GeminiResultEvent) break;
+      }
+
+      // Get session history twice - should work both times
+      final history1 = await client.getSessionHistory(
+        sessionId,
+        projectDirectory: testWorkDir,
+      );
+      final history2 = await client.getSessionHistory(
+        sessionId,
+        projectDirectory: testWorkDir,
+      );
+
+      // Both should return the same events
+      expect(history1.length, equals(history2.length));
+    });
+
     test('getSessionHistory throws for non-existent session', () async {
       expect(
-        () => client.getSessionHistory('non-existent-session-id-xyz'),
+        () => client.getSessionHistory(
+          'non-existent-session-id-xyz',
+          projectDirectory: testWorkDir,
+        ),
         throwsA(isA<GeminiProcessException>()),
         reason: 'Should throw for non-existent session',
       );
     });
-
   });
 }

@@ -5,9 +5,18 @@ void main() {
   group('CodexApprovalPolicy', () {
     test('has all expected values', () {
       expect(CodexApprovalPolicy.values, hasLength(4));
-      expect(CodexApprovalPolicy.values, contains(CodexApprovalPolicy.onRequest));
-      expect(CodexApprovalPolicy.values, contains(CodexApprovalPolicy.untrusted));
-      expect(CodexApprovalPolicy.values, contains(CodexApprovalPolicy.onFailure));
+      expect(
+        CodexApprovalPolicy.values,
+        contains(CodexApprovalPolicy.onRequest),
+      );
+      expect(
+        CodexApprovalPolicy.values,
+        contains(CodexApprovalPolicy.untrusted),
+      );
+      expect(
+        CodexApprovalPolicy.values,
+        contains(CodexApprovalPolicy.onFailure),
+      );
       expect(CodexApprovalPolicy.values, contains(CodexApprovalPolicy.never));
     });
   });
@@ -16,8 +25,14 @@ void main() {
     test('has all expected values', () {
       expect(CodexSandboxMode.values, hasLength(3));
       expect(CodexSandboxMode.values, contains(CodexSandboxMode.readOnly));
-      expect(CodexSandboxMode.values, contains(CodexSandboxMode.workspaceWrite));
-      expect(CodexSandboxMode.values, contains(CodexSandboxMode.dangerFullAccess));
+      expect(
+        CodexSandboxMode.values,
+        contains(CodexSandboxMode.workspaceWrite),
+      );
+      expect(
+        CodexSandboxMode.values,
+        contains(CodexSandboxMode.dangerFullAccess),
+      );
     });
   });
 
@@ -226,7 +241,9 @@ void main() {
         'id': 'mcp_01',
         'tool_name': 'database_query',
         'tool_input': {'sql': 'SELECT * FROM users'},
-        'tool_result': [{'id': 1, 'name': 'Alice'}],
+        'tool_result': [
+          {'id': 1, 'name': 'Alice'},
+        ],
       };
 
       final item = CodexItem.fromJson(json);

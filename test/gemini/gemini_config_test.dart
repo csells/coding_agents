@@ -22,9 +22,7 @@ void main() {
     });
 
     test('constructs with yolo approval mode', () {
-      final config = GeminiSessionConfig(
-        approvalMode: GeminiApprovalMode.yolo,
-      );
+      final config = GeminiSessionConfig(approvalMode: GeminiApprovalMode.yolo);
 
       expect(config.approvalMode, GeminiApprovalMode.yolo);
     });
@@ -46,9 +44,7 @@ void main() {
     });
 
     test('constructs with model', () {
-      final config = GeminiSessionConfig(
-        model: 'gemini-2.0-flash-exp',
-      );
+      final config = GeminiSessionConfig(model: 'gemini-2.0-flash-exp');
 
       expect(config.model, 'gemini-2.0-flash-exp');
     });

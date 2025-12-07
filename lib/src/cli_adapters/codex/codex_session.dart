@@ -22,8 +22,8 @@ class CodexSession {
     required this.threadId,
     required StreamController<CodexEvent> eventController,
     required int turnId,
-  })  : _eventController = eventController,
-        _currentTurnId = turnId;
+  }) : _eventController = eventController,
+       _currentTurnId = turnId;
 
   /// Internal factory for creating sessions
   static Future<CodexSession> create({

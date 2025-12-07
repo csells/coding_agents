@@ -22,8 +22,8 @@ class GeminiSession {
     required this.sessionId,
     required StreamController<GeminiEvent> eventController,
     required int turnId,
-  })  : _eventController = eventController,
-        _currentTurnId = turnId;
+  }) : _eventController = eventController,
+       _currentTurnId = turnId;
 
   /// Internal factory for creating sessions
   static Future<GeminiSession> create({

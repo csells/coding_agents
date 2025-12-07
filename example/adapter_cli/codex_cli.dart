@@ -1,62 +1,94 @@
 /// Simple interactive CLI for Codex
-///
-/// Usage:
-///   dart run example/simple_cli/codex_cli.dart [options]
-///
-/// Options:
-///   -d, --project-directory  Working directory (default: current directory)
-///   -p, --prompt             Execute a single prompt and exit
-///   -s, --list-sessions      List available sessions
-///   -r, --resume-session     Resume a session by ID
-///   -y, --yolo               Skip permission prompts (full-auto mode)
-///
-/// Examples:
-///   dart run example/simple_cli/codex_cli.dart
-///   dart run example/simple_cli/codex_cli.dart -p "What is 2+2?"
-///   dart run example/simple_cli/codex_cli.dart -s
-///   dart run example/simple_cli/codex_cli.dart -r thread_abc123
-///   dart run example/simple_cli/codex_cli.dart -r thread_abc123 -p "Continue"
 library;
 
 import 'dart:io';
 
 import 'package:coding_agents/coding_agents.dart';
 
+void _printHelp() {
+  print('''
+Codex CLI - Simple interactive CLI for Codex
+
+Usage:
+  dart run codex_cli.dart [options]
+
+Options:
+  -h, --help               Show this help message
+  -d, --project-directory  Working directory (default: current directory)
+  -p, --prompt             Execute a single prompt and exit
+  -l, --list-sessions      List available sessions
+  -r, --resume-session     Resume a session by ID
+  -y, --yolo               Skip permission prompts (full-auto mode)
+
+Examples:
+  dart run codex_cli.dart
+  dart run codex_cli.dart -p "What is 2+2?"
+  dart run codex_cli.dart -l
+  dart run codex_cli.dart -r thread_abc123
+  dart run codex_cli.dart -r thread_abc123 -p "Continue"
+''');
+}
+
+void _printReplHelp() {
+  print('''
+Available commands:
+  /help   Show this help message
+  /exit   Exit the REPL
+  /quit   Exit the REPL
+''');
+}
+
 Future<void> main(List<String> args) async {
   final parsed = _parseArgs(args);
+
+  if (parsed.showHelp) {
+    _printHelp();
+    return;
+  }
+
   final projectDir = parsed.projectDirectory ?? Directory.current.path;
-  final client = CodexCliAdapter(cwd: projectDir);
+  final client = CodexCliAdapter();
 
   if (parsed.listSessions) {
-    await _listSessions(client);
+    await _listSessions(client, projectDir);
     return;
   }
 
   if (parsed.resumeSession != null) {
     if (parsed.prompt != null) {
       // One-shot with resumed session
-      await _oneShot(client, parsed.prompt!, parsed.yolo,
-          threadId: parsed.resumeSession);
+      await _oneShot(
+        client,
+        parsed.prompt!,
+        parsed.yolo,
+        projectDir,
+        threadId: parsed.resumeSession,
+      );
     } else {
       // REPL with resumed session
-      await _showHistory(client, parsed.resumeSession!);
-      await _repl(client, parsed.yolo, threadId: parsed.resumeSession);
+      await _showHistory(client, parsed.resumeSession!, projectDir);
+      await _repl(
+        client,
+        parsed.yolo,
+        projectDir,
+        threadId: parsed.resumeSession,
+      );
     }
     return;
   }
 
   if (parsed.prompt != null) {
     // One-shot mode
-    await _oneShot(client, parsed.prompt!, parsed.yolo);
+    await _oneShot(client, parsed.prompt!, parsed.yolo, projectDir);
     return;
   }
 
   // Interactive REPL mode
-  await _repl(client, parsed.yolo);
+  await _repl(client, parsed.yolo, projectDir);
 }
 
-Future<void> _listSessions(CodexCliAdapter client) async {
-  final sessions = await client.listSessions();
+Future<void> _listSessions(CodexCliAdapter client, String projectDir) async {
+  final sessions = await client.listSessions(projectDirectory: projectDir);
 
   if (sessions.isEmpty) {
     print('No sessions found.');
@@ -69,20 +101,17 @@ Future<void> _listSessions(CodexCliAdapter client) async {
   for (final session in sessions) {
     // Get the first prompt from history
     String firstPrompt = '(no prompt)';
-    final history = await client.getSessionHistory(session.threadId);
+    final history = await client.getSessionHistory(
+      session.threadId,
+      projectDirectory: projectDir,
+    );
     for (final event in history) {
-      if (event is CodexItemCompletedEvent) {
-        final item = event.item;
-        if (item is CodexAgentMessageItem) {
-          // The first user message is typically from the prompt
-          // But Codex might not store user messages as events
-          // Try to get the agent's first response instead
-          firstPrompt = item.text;
-          if (firstPrompt.length > 60) {
-            firstPrompt = '${firstPrompt.substring(0, 60)}...';
-          }
-          break;
+      if (event is CodexUserMessageEvent) {
+        firstPrompt = event.message;
+        if (firstPrompt.length > 60) {
+          firstPrompt = '${firstPrompt.substring(0, 60)}...';
         }
+        break;
       }
     }
 
@@ -93,14 +122,23 @@ Future<void> _listSessions(CodexCliAdapter client) async {
   }
 }
 
-Future<void> _showHistory(CodexCliAdapter client, String threadId) async {
+Future<void> _showHistory(
+  CodexCliAdapter client,
+  String threadId,
+  String projectDir,
+) async {
   print('Loading session history...');
   print('');
 
-  final history = await client.getSessionHistory(threadId);
+  final history = await client.getSessionHistory(
+    threadId,
+    projectDirectory: projectDir,
+  );
 
   for (final event in history) {
     switch (event) {
+      case CodexUserMessageEvent():
+        print('You: ${event.message}');
       case CodexItemCompletedEvent():
         final item = event.item;
         switch (item) {
@@ -138,16 +176,24 @@ Future<void> _showHistory(CodexCliAdapter client, String threadId) async {
 Future<void> _oneShot(
   CodexCliAdapter client,
   String prompt,
-  bool yolo, {
+  bool yolo,
+  String projectDir, {
   String? threadId,
 }) async {
-  final config = CodexSessionConfig(
-    fullAuto: yolo,
-  );
+  final config = CodexSessionConfig(fullAuto: yolo);
 
   final session = threadId != null
-      ? await client.resumeSession(threadId, prompt, config)
-      : await client.createSession(prompt, config);
+      ? await client.resumeSession(
+          threadId,
+          prompt,
+          config,
+          projectDirectory: projectDir,
+        )
+      : await client.createSession(
+          prompt,
+          config,
+          projectDirectory: projectDir,
+        );
 
   await for (final event in session.events) {
     switch (event) {
@@ -172,11 +218,13 @@ Future<void> _oneShot(
 
 Future<void> _repl(
   CodexCliAdapter client,
-  bool yolo, {
+  bool yolo,
+  String projectDir, {
   String? threadId,
 }) async {
-  print('Codex CLI (type "exit" to quit)');
+  print('Codex CLI');
   print('');
+  _printReplHelp();
 
   String? currentThreadId = threadId;
 
@@ -184,20 +232,38 @@ Future<void> _repl(
     stdout.write('You: ');
     final input = stdin.readLineSync();
 
-    if (input == null || input.toLowerCase() == 'exit') {
+    if (input == null) {
       print('Goodbye!');
       break;
     }
 
+    final trimmed = input.trim().toLowerCase();
+    if (trimmed == '/exit' || trimmed == '/quit') {
+      print('Goodbye!');
+      break;
+    }
+
+    if (trimmed == '/help') {
+      _printReplHelp();
+      continue;
+    }
+
     if (input.trim().isEmpty) continue;
 
-    final config = CodexSessionConfig(
-      fullAuto: yolo,
-    );
+    final config = CodexSessionConfig(fullAuto: yolo);
 
     final session = currentThreadId != null
-        ? await client.resumeSession(currentThreadId, input, config)
-        : await client.createSession(input, config);
+        ? await client.resumeSession(
+            currentThreadId,
+            input,
+            config,
+            projectDirectory: projectDir,
+          )
+        : await client.createSession(
+            input,
+            config,
+            projectDirectory: projectDir,
+          );
 
     currentThreadId = session.threadId;
 
@@ -236,6 +302,7 @@ class _ParsedArgs {
   final bool listSessions;
   final String? resumeSession;
   final bool yolo;
+  final bool showHelp;
 
   _ParsedArgs({
     this.projectDirectory,
@@ -243,6 +310,7 @@ class _ParsedArgs {
     this.listSessions = false,
     this.resumeSession,
     this.yolo = false,
+    this.showHelp = false,
   });
 }
 
@@ -252,11 +320,15 @@ _ParsedArgs _parseArgs(List<String> args) {
   bool listSessions = false;
   String? resumeSession;
   bool yolo = false;
+  bool showHelp = false;
 
   for (var i = 0; i < args.length; i++) {
     final arg = args[i];
 
     switch (arg) {
+      case '-h':
+      case '--help':
+        showHelp = true;
       case '-d':
       case '--project-directory':
         if (i + 1 < args.length) {
@@ -267,7 +339,7 @@ _ParsedArgs _parseArgs(List<String> args) {
         if (i + 1 < args.length) {
           prompt = args[++i];
         }
-      case '-s':
+      case '-l':
       case '--list-sessions':
         listSessions = true;
       case '-r':
@@ -287,5 +359,6 @@ _ParsedArgs _parseArgs(List<String> args) {
     listSessions: listSessions,
     resumeSession: resumeSession,
     yolo: yolo,
+    showHelp: showHelp,
   );
 }

@@ -25,12 +25,12 @@ sealed class ClaudeEvent {
       'result' => ClaudeResultEvent.fromJson(json, turnId),
       'system' => ClaudeSystemEvent.fromJson(json, turnId),
       _ => ClaudeUnknownEvent(
-          sessionId: sessionId,
-          turnId: turnId,
-          timestamp: timestamp,
-          type: type,
-          data: json,
-        ),
+        sessionId: sessionId,
+        turnId: turnId,
+        timestamp: timestamp,
+        type: type,
+        data: json,
+      ),
     };
   }
 }
@@ -50,7 +50,8 @@ class ClaudeInitEvent extends ClaudeEvent {
       ClaudeInitEvent(
         sessionId: json['session_id'] as String,
         turnId: turnId,
-        timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+        timestamp:
+            DateTime.tryParse(json['timestamp'] as String? ?? '') ??
             DateTime.now(),
         model: json['model'] as String? ?? '',
       );
@@ -71,7 +72,8 @@ class ClaudeAssistantEvent extends ClaudeEvent {
 
   factory ClaudeAssistantEvent.fromJson(Map<String, dynamic> json, int turnId) {
     final message = json['message'] as Map<String, dynamic>?;
-    final contentList = (message?['content'] as List<dynamic>?)
+    final contentList =
+        (message?['content'] as List<dynamic>?)
             ?.map((e) => ClaudeContentBlock.fromJson(e as Map<String, dynamic>))
             .toList() ??
         [];
@@ -82,7 +84,8 @@ class ClaudeAssistantEvent extends ClaudeEvent {
     return ClaudeAssistantEvent(
       sessionId: json['session_id'] as String? ?? '',
       turnId: turnId,
-      timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+      timestamp:
+          DateTime.tryParse(json['timestamp'] as String? ?? '') ??
           DateTime.now(),
       content: contentList,
       usage: usage,
@@ -120,7 +123,8 @@ class ClaudeUserEvent extends ClaudeEvent {
     return ClaudeUserEvent(
       sessionId: json['session_id'] as String? ?? '',
       turnId: turnId,
-      timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+      timestamp:
+          DateTime.tryParse(json['timestamp'] as String? ?? '') ??
           DateTime.now(),
       content: contentList,
     );
@@ -154,7 +158,8 @@ class ClaudeResultEvent extends ClaudeEvent {
       ClaudeResultEvent(
         sessionId: json['session_id'] as String? ?? '',
         turnId: turnId,
-        timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+        timestamp:
+            DateTime.tryParse(json['timestamp'] as String? ?? '') ??
             DateTime.now(),
         subtype: json['subtype'] as String? ?? 'unknown',
         isError: json['is_error'] as bool? ?? false,
@@ -185,7 +190,8 @@ class ClaudeSystemEvent extends ClaudeEvent {
       ClaudeSystemEvent(
         sessionId: json['session_id'] as String? ?? '',
         turnId: turnId,
-        timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+        timestamp:
+            DateTime.tryParse(json['timestamp'] as String? ?? '') ??
             DateTime.now(),
         subtype: json['subtype'] as String? ?? 'unknown',
         data: json,

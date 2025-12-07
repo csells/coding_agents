@@ -41,9 +41,7 @@ void main() {
     });
 
     test('constructs with readOnly sandbox mode', () {
-      final config = CodexSessionConfig(
-        sandboxMode: CodexSandboxMode.readOnly,
-      );
+      final config = CodexSessionConfig(sandboxMode: CodexSandboxMode.readOnly);
 
       expect(config.sandboxMode, CodexSandboxMode.readOnly);
     });
@@ -82,10 +80,7 @@ void main() {
 
     test('constructs with environment variables', () {
       final config = CodexSessionConfig(
-        environment: {
-          'API_KEY': 'secret',
-          'DEBUG': 'true',
-        },
+        environment: {'API_KEY': 'secret', 'DEBUG': 'true'},
       );
 
       expect(config.environment, hasLength(2));

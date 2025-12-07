@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
+
 import 'gemini_events.dart';
 import 'gemini_session.dart';
 import 'gemini_types.dart';
@@ -18,25 +20,23 @@ class GeminiProcessException implements Exception {
 
 /// Client for interacting with Gemini CLI
 class GeminiCliAdapter {
-  final String cwd;
-
   int _turnCounter = 0;
 
-  GeminiCliAdapter({required this.cwd});
+  GeminiCliAdapter();
 
-  /// List all sessions for this working directory
+  /// List all sessions for a project directory
   ///
   /// Parses the text output from `gemini --list-sessions` which has format:
   /// ```
   /// Available sessions for this project (N):
   ///   1. Prompt text (time ago) [session-uuid]
   /// ```
-  Future<List<GeminiSessionInfo>> listSessions() async {
-    final result = await Process.run(
-      'gemini',
-      ['--list-sessions'],
-      workingDirectory: cwd,
-    );
+  Future<List<GeminiSessionInfo>> listSessions({
+    required String projectDirectory,
+  }) async {
+    final result = await Process.run('gemini', [
+      '--list-sessions',
+    ], workingDirectory: projectDirectory);
 
     if (result.exitCode != 0) {
       throw GeminiProcessException('Failed to list sessions: ${result.stderr}');
@@ -50,7 +50,9 @@ class GeminiCliAdapter {
     final now = DateTime.now();
 
     // Pattern: "  1. Prompt text (time ago) [session-uuid]"
-    final linePattern = RegExp(r'^\s*\d+\.\s+.+\s+\(([^)]+)\)\s+\[([a-f0-9-]+)\]$');
+    final linePattern = RegExp(
+      r'^\s*\d+\.\s+.+\s+\(([^)]+)\)\s+\[([a-f0-9-]+)\]$',
+    );
 
     for (final line in output.split('\n')) {
       final match = linePattern.firstMatch(line);
@@ -61,13 +63,15 @@ class GeminiCliAdapter {
         // Parse relative time to approximate DateTime
         final timestamp = _parseRelativeTime(timeAgo, now);
 
-        sessions.add(GeminiSessionInfo(
-          sessionId: sessionId,
-          projectHash: '', // Not available from CLI output
-          startTime: timestamp,
-          lastUpdated: timestamp,
-          messageCount: 0, // Not available from CLI output
-        ));
+        sessions.add(
+          GeminiSessionInfo(
+            sessionId: sessionId,
+            projectHash: '', // Not available from CLI output
+            startTime: timestamp,
+            lastUpdated: timestamp,
+            messageCount: 0, // Not available from CLI output
+          ),
+        );
       }
     }
 
@@ -78,38 +82,40 @@ class GeminiCliAdapter {
   ///
   /// Parses the session JSON file and returns all events in order.
   /// Gemini stores sessions as JSON files with a messages array.
+  /// Only returns history for sessions that match the given projectDirectory.
   /// Throws [GeminiProcessException] if the session file is not found.
-  Future<List<GeminiEvent>> getSessionHistory(String sessionId) async {
-    final geminiDir = Directory(
-      '${Platform.environment['HOME']}/.gemini/tmp',
-    );
+  Future<List<GeminiEvent>> getSessionHistory(
+    String sessionId, {
+    required String projectDirectory,
+  }) async {
+    final geminiDir = Directory('${Platform.environment['HOME']}/.gemini/tmp');
 
     if (!await geminiDir.exists()) {
       throw GeminiProcessException('Session not found: $sessionId');
     }
 
-    // Find the session file by searching all project directories
+    // Compute the project hash to find the correct directory
+    final projectHash = _computeProjectHash(projectDirectory);
+    final projectSessionsDir = Directory(
+      '${geminiDir.path}/$projectHash/chats',
+    );
+
+    if (!await projectSessionsDir.exists()) {
+      throw GeminiProcessException('Session not found: $sessionId');
+    }
+
+    // Find the session file in the project's chats directory
     File? sessionFile;
-    await for (final projectDir in geminiDir.list()) {
-      if (projectDir is! Directory) continue;
+    await for (final file in projectSessionsDir.list()) {
+      if (file is! File || !file.path.endsWith('.json')) continue;
 
-      final chatsDir = Directory('${projectDir.path}/chats');
-      if (!await chatsDir.exists()) continue;
-
-      // Check all .json files in chats directory
-      await for (final file in chatsDir.list()) {
-        if (file is! File || !file.path.endsWith('.json')) continue;
-
-        // Read file and check sessionId
-        final content = await file.readAsString();
-        final json = jsonDecode(content) as Map<String, dynamic>;
-        if (json['sessionId'] == sessionId) {
-          sessionFile = file;
-          break;
-        }
+      // Read file and check sessionId
+      final content = await file.readAsString();
+      final json = jsonDecode(content) as Map<String, dynamic>;
+      if (json['sessionId'] == sessionId) {
+        sessionFile = file;
+        break;
       }
-
-      if (sessionFile != null) break;
     }
 
     if (sessionFile == null) {
@@ -125,11 +131,9 @@ class GeminiCliAdapter {
     var turnId = 0;
 
     // Add init event
-    events.add(GeminiInitEvent(
-      sessionId: sessionId,
-      turnId: turnId,
-      model: '',
-    ));
+    events.add(
+      GeminiInitEvent(sessionId: sessionId, turnId: turnId, model: ''),
+    );
 
     // Convert messages to events
     for (final msg in messages) {
@@ -139,31 +143,37 @@ class GeminiCliAdapter {
       final timestamp = DateTime.tryParse(msgMap['timestamp'] as String? ?? '');
 
       if (type == 'user') {
-        events.add(GeminiMessageEvent(
-          sessionId: sessionId,
-          turnId: turnId,
-          role: 'user',
-          content: msgContent,
-          delta: false,
-          timestamp: timestamp,
-        ));
+        events.add(
+          GeminiMessageEvent(
+            sessionId: sessionId,
+            turnId: turnId,
+            role: 'user',
+            content: msgContent,
+            delta: false,
+            timestamp: timestamp,
+          ),
+        );
       } else if (type == 'gemini') {
-        events.add(GeminiMessageEvent(
-          sessionId: sessionId,
-          turnId: turnId,
-          role: 'assistant',
-          content: msgContent,
-          delta: false,
-          timestamp: timestamp,
-        ));
+        events.add(
+          GeminiMessageEvent(
+            sessionId: sessionId,
+            turnId: turnId,
+            role: 'assistant',
+            content: msgContent,
+            delta: false,
+            timestamp: timestamp,
+          ),
+        );
 
         // Add a result event after assistant message to mark turn complete
-        events.add(GeminiResultEvent(
-          sessionId: sessionId,
-          turnId: turnId,
-          status: 'success',
-          timestamp: timestamp,
-        ));
+        events.add(
+          GeminiResultEvent(
+            sessionId: sessionId,
+            turnId: turnId,
+            status: 'success',
+            timestamp: timestamp,
+          ),
+        );
         turnId++;
       }
     }
@@ -179,7 +189,9 @@ class GeminiCliAdapter {
       return now;
     }
 
-    final pattern = RegExp(r'(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago');
+    final pattern = RegExp(
+      r'(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago',
+    );
     final match = pattern.firstMatch(lower);
 
     if (match != null) {
@@ -208,18 +220,33 @@ class GeminiCliAdapter {
     return now;
   }
 
+  /// Compute the project hash used by Gemini CLI for session storage
+  ///
+  /// Gemini CLI stores sessions in `~/.gemini/tmp/{projectHash}/chats/`
+  /// where projectHash is the SHA-256 hash of the project directory path.
+  String _computeProjectHash(String projectDirectory) {
+    final bytes = utf8.encode(projectDirectory);
+    final digest = sha256.convert(bytes);
+    return digest.toString();
+  }
+
   /// Create a new Gemini session with the given prompt
   ///
   /// Spawns a Gemini process for the initial turn.
   /// Returns a [GeminiSession] that provides access to the event stream.
   Future<GeminiSession> createSession(
     String prompt,
-    GeminiSessionConfig config,
-  ) async {
+    GeminiSessionConfig config, {
+    required String projectDirectory,
+  }) async {
     final args = buildInitialArgs(prompt, config);
     final turnId = _turnCounter++;
 
-    final process = await Process.start('gemini', args, workingDirectory: cwd);
+    final process = await Process.start(
+      'gemini',
+      args,
+      workingDirectory: projectDirectory,
+    );
     final eventController = StreamController<GeminiEvent>();
     final bufferedEvents = <GeminiEvent>[];
     final stderrBuffer = StringBuffer();
@@ -251,7 +278,8 @@ class GeminiCliAdapter {
 
           // Check for API errors in result events and throw exception
           if (event is GeminiResultEvent && event.status == 'error') {
-            final errorMsg = event.error?['message'] as String? ??
+            final errorMsg =
+                event.error?['message'] as String? ??
                 'Gemini API error occurred';
             eventController.addError(GeminiProcessException(errorMsg));
             return;
@@ -321,12 +349,17 @@ class GeminiCliAdapter {
   Future<GeminiSession> resumeSession(
     String sessionId,
     String prompt,
-    GeminiSessionConfig config,
-  ) async {
+    GeminiSessionConfig config, {
+    required String projectDirectory,
+  }) async {
     final args = buildResumeArgs(sessionId, prompt, config);
     final turnId = _turnCounter++;
 
-    final process = await Process.start('gemini', args, workingDirectory: cwd);
+    final process = await Process.start(
+      'gemini',
+      args,
+      workingDirectory: projectDirectory,
+    );
     final eventController = StreamController<GeminiEvent>();
     final bufferedEvents = <GeminiEvent>[];
     final stderrBuffer = StringBuffer();
@@ -348,7 +381,8 @@ class GeminiCliAdapter {
 
           // Check for API errors in result events and throw exception
           if (event is GeminiResultEvent && event.status == 'error') {
-            final errorMsg = event.error?['message'] as String? ??
+            final errorMsg =
+                event.error?['message'] as String? ??
                 'Gemini API error occurred';
             eventController.addError(GeminiProcessException(errorMsg));
             return;

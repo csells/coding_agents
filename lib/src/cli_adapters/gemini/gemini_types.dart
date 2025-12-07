@@ -3,11 +3,7 @@ import 'package:json_annotation/json_annotation.dart';
 part 'gemini_types.g.dart';
 
 /// Approval mode for Gemini CLI
-enum GeminiApprovalMode {
-  defaultMode,
-  autoEdit,
-  yolo,
-}
+enum GeminiApprovalMode { defaultMode, autoEdit, yolo }
 
 /// Information about a Gemini session
 @JsonSerializable()
@@ -50,30 +46,35 @@ class GeminiStats {
 
   /// Parse from JSON, handling both camelCase and snake_case, with nullable fields
   factory GeminiStats.fromJson(Map<String, dynamic> json) => GeminiStats(
-        totalTokens: (json['totalTokens'] as num?)?.toInt() ??
-            (json['total_tokens'] as num?)?.toInt() ??
-            0,
-        inputTokens: (json['inputTokens'] as num?)?.toInt() ??
-            (json['input_tokens'] as num?)?.toInt() ??
-            0,
-        outputTokens: (json['outputTokens'] as num?)?.toInt() ??
-            (json['output_tokens'] as num?)?.toInt() ??
-            0,
-        durationMs: (json['durationMs'] as num?)?.toInt() ??
-            (json['duration_ms'] as num?)?.toInt() ??
-            0,
-        toolCalls: (json['toolCalls'] as num?)?.toInt() ??
-            (json['tool_calls'] as num?)?.toInt() ??
-            0,
-      );
+    totalTokens:
+        (json['totalTokens'] as num?)?.toInt() ??
+        (json['total_tokens'] as num?)?.toInt() ??
+        0,
+    inputTokens:
+        (json['inputTokens'] as num?)?.toInt() ??
+        (json['input_tokens'] as num?)?.toInt() ??
+        0,
+    outputTokens:
+        (json['outputTokens'] as num?)?.toInt() ??
+        (json['output_tokens'] as num?)?.toInt() ??
+        0,
+    durationMs:
+        (json['durationMs'] as num?)?.toInt() ??
+        (json['duration_ms'] as num?)?.toInt() ??
+        0,
+    toolCalls:
+        (json['toolCalls'] as num?)?.toInt() ??
+        (json['tool_calls'] as num?)?.toInt() ??
+        0,
+  );
 
   Map<String, dynamic> toJson() => {
-        'totalTokens': totalTokens,
-        'inputTokens': inputTokens,
-        'outputTokens': outputTokens,
-        'durationMs': durationMs,
-        'toolCalls': toolCalls,
-      };
+    'totalTokens': totalTokens,
+    'inputTokens': inputTokens,
+    'outputTokens': outputTokens,
+    'durationMs': durationMs,
+    'toolCalls': toolCalls,
+  };
 }
 
 /// Tool use information
@@ -218,10 +219,7 @@ class ChatMessage {
   /// The content of the message.
   final String text;
 
-  ChatMessage({
-    required this.role,
-    required this.text,
-  });
+  ChatMessage({required this.role, required this.text});
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) =>
       _$ChatMessageFromJson(json);
@@ -238,14 +236,10 @@ class ChatRequest {
   /// Configuration for the chat session.
   final GeminiSessionConfig config;
 
-  ChatRequest({
-    required this.messages,
-    required this.config,
-  });
+  ChatRequest({required this.messages, required this.config});
 
   factory ChatRequest.fromJson(Map<String, dynamic> json) =>
       _$ChatRequestFromJson(json);
 
   Map<String, dynamic> toJson() => _$ChatRequestToJson(this);
 }
-

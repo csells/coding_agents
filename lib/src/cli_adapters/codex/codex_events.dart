@@ -87,6 +87,39 @@ sealed class CodexEvent {
           message: message,
         );
 
+      case 'session_meta':
+        final payload = json['payload'] as Map<String, dynamic>?;
+        return CodexSessionMetaEvent(
+          threadId: payload?['id'] as String? ?? threadId,
+          turnId: turnId,
+          cwd: payload?['cwd'] as String?,
+          model: payload?['model_provider'] as String?,
+        );
+
+      case 'event_msg':
+        final payload = json['payload'] as Map<String, dynamic>?;
+        final msgType = payload?['type'] as String?;
+        if (msgType == 'user_message') {
+          return CodexUserMessageEvent(
+            threadId: threadId,
+            turnId: turnId,
+            message: payload?['message'] as String? ?? '',
+          );
+        }
+        if (msgType == 'agent_message') {
+          return CodexAgentMessageEvent(
+            threadId: threadId,
+            turnId: turnId,
+            message: payload?['message'] as String? ?? '',
+          );
+        }
+        return CodexUnknownEvent(
+          threadId: threadId,
+          turnId: turnId,
+          type: 'event_msg:$msgType',
+          data: json,
+        );
+
       default:
         return CodexUnknownEvent(
           threadId: threadId,
@@ -183,6 +216,44 @@ class CodexErrorEvent extends CodexEvent {
   final String message;
 
   CodexErrorEvent({
+    required super.threadId,
+    required super.turnId,
+    super.timestamp,
+    required this.message,
+  });
+}
+
+/// Session metadata event - contains session info including cwd
+class CodexSessionMetaEvent extends CodexEvent {
+  final String? cwd;
+  final String? model;
+
+  CodexSessionMetaEvent({
+    required super.threadId,
+    required super.turnId,
+    super.timestamp,
+    this.cwd,
+    this.model,
+  });
+}
+
+/// User message event - contains the user's prompt
+class CodexUserMessageEvent extends CodexEvent {
+  final String message;
+
+  CodexUserMessageEvent({
+    required super.threadId,
+    required super.turnId,
+    super.timestamp,
+    required this.message,
+  });
+}
+
+/// Agent message event - contains the agent's response
+class CodexAgentMessageEvent extends CodexEvent {
+  final String message;
+
+  CodexAgentMessageEvent({
     required super.threadId,
     required super.turnId,
     super.timestamp,

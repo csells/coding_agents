@@ -20,9 +20,9 @@ class ClaudeSession {
     required StreamController<ClaudeEvent> eventController,
     required Process process,
     required int turnId,
-  })  : _eventController = eventController,
-        _process = process,
-        _currentTurnId = turnId;
+  }) : _eventController = eventController,
+       _process = process,
+       _currentTurnId = turnId;
 
   /// Internal factory for creating sessions
   static Future<ClaudeSession> create({

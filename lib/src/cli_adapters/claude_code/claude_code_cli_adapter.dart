@@ -19,12 +19,9 @@ class ClaudeProcessException implements Exception {
 
 /// Client for interacting with Claude Code CLI
 class ClaudeCodeCliAdapter {
-  /// Working directory for the Claude process
-  final String cwd;
-
   int _turnCounter = 0;
 
-  ClaudeCodeCliAdapter({required this.cwd});
+  ClaudeCodeCliAdapter();
 
   /// Create a new Claude session with the given prompt
   ///
@@ -32,9 +29,10 @@ class ClaudeCodeCliAdapter {
   /// Returns a [ClaudeSession] that provides access to the event stream.
   Future<ClaudeSession> createSession(
     String prompt,
-    ClaudeSessionConfig config,
-  ) async {
-    return _startSession(prompt, config, null);
+    ClaudeSessionConfig config, {
+    required String projectDirectory,
+  }) async {
+    return _startSession(prompt, config, null, projectDirectory);
   }
 
   /// Resume an existing session with a new prompt
@@ -44,16 +42,21 @@ class ClaudeCodeCliAdapter {
   Future<ClaudeSession> resumeSession(
     String sessionId,
     String prompt,
-    ClaudeSessionConfig config,
-  ) async {
-    return _startSession(prompt, config, sessionId);
+    ClaudeSessionConfig config, {
+    required String projectDirectory,
+  }) async {
+    return _startSession(prompt, config, sessionId, projectDirectory);
   }
 
-  /// List all sessions for this working directory
+  /// List all sessions for a project directory
   ///
   /// Claude encodes paths by replacing `/` and `_` with `-`
-  Future<List<ClaudeSessionInfo>> listSessions() async {
-    final encodedCwd = cwd.replaceAll('/', '-').replaceAll('_', '-');
+  Future<List<ClaudeSessionInfo>> listSessions({
+    required String projectDirectory,
+  }) async {
+    final encodedCwd = projectDirectory
+        .replaceAll('/', '-')
+        .replaceAll('_', '-');
     final projectDir = Directory(
       '${Platform.environment['HOME']}/.claude/projects/$encodedCwd',
     );
@@ -71,7 +74,7 @@ class ClaudeCodeCliAdapter {
       final filename = file.path.split('/').last;
       if (filename.startsWith('agent-')) continue;
 
-      final info = await _parseSessionFile(file);
+      final info = await _parseSessionFile(file, projectDirectory);
       if (info != null) {
         sessions.add(info);
       }
@@ -87,11 +90,16 @@ class ClaudeCodeCliAdapter {
     String prompt,
     ClaudeSessionConfig config,
     String? sessionId,
+    String projectDirectory,
   ) async {
     final args = buildArgs(config, prompt, sessionId);
     final turnId = _turnCounter++;
 
-    final process = await Process.start('claude', args, workingDirectory: cwd);
+    final process = await Process.start(
+      'claude',
+      args,
+      workingDirectory: projectDirectory,
+    );
     final eventController = StreamController<ClaudeEvent>();
     final bufferedEvents = <ClaudeEvent>[];
     final stderrBuffer = StringBuffer();
@@ -283,8 +291,13 @@ class ClaudeCodeCliAdapter {
   ///
   /// Parses the session JSONL file and returns all events in order.
   /// Throws [ClaudeProcessException] if the session file is not found.
-  Future<List<ClaudeEvent>> getSessionHistory(String sessionId) async {
-    final encodedCwd = cwd.replaceAll('/', '-').replaceAll('_', '-');
+  Future<List<ClaudeEvent>> getSessionHistory(
+    String sessionId, {
+    required String projectDirectory,
+  }) async {
+    final encodedCwd = projectDirectory
+        .replaceAll('/', '-')
+        .replaceAll('_', '-');
     final sessionFile = File(
       '${Platform.environment['HOME']}/.claude/projects/$encodedCwd/$sessionId.jsonl',
     );
@@ -319,7 +332,10 @@ class ClaudeCodeCliAdapter {
     return events;
   }
 
-  Future<ClaudeSessionInfo?> _parseSessionFile(File file) async {
+  Future<ClaudeSessionInfo?> _parseSessionFile(
+    File file,
+    String projectDirectory,
+  ) async {
     // Read first few lines to extract metadata
     final lines = await file
         .openRead()
@@ -368,7 +384,7 @@ class ClaudeCodeCliAdapter {
 
     return ClaudeSessionInfo(
       sessionId: sessionId,
-      cwd: cwd,
+      cwd: projectDirectory,
       gitBranch: gitBranch,
       timestamp: timestamp,
       lastUpdated: lastUpdated,

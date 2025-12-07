@@ -18,12 +18,7 @@ enum ClaudePermissionMode {
 }
 
 /// Permission behavior response values
-enum ClaudePermissionBehavior {
-  allow,
-  deny,
-  allowAlways,
-  denyAlways,
-}
+enum ClaudePermissionBehavior { allow, deny, allowAlways, denyAlways }
 
 /// Information about a stored Claude session
 @JsonSerializable()
@@ -101,30 +96,30 @@ class ClaudeUsage {
 
   /// Parse from JSON, handling both snake_case (Claude API) and camelCase
   factory ClaudeUsage.fromJson(Map<String, dynamic> json) => ClaudeUsage(
-        inputTokens:
-            (json['input_tokens'] as num?)?.toInt() ??
-            (json['inputTokens'] as num?)?.toInt() ??
-            0,
-        outputTokens:
-            (json['output_tokens'] as num?)?.toInt() ??
-            (json['outputTokens'] as num?)?.toInt() ??
-            0,
-        cacheCreationInputTokens:
-            (json['cache_creation_input_tokens'] as num?)?.toInt() ??
-            (json['cacheCreationInputTokens'] as num?)?.toInt(),
-        cacheReadInputTokens:
-            (json['cache_read_input_tokens'] as num?)?.toInt() ??
-            (json['cacheReadInputTokens'] as num?)?.toInt(),
-      );
+    inputTokens:
+        (json['input_tokens'] as num?)?.toInt() ??
+        (json['inputTokens'] as num?)?.toInt() ??
+        0,
+    outputTokens:
+        (json['output_tokens'] as num?)?.toInt() ??
+        (json['outputTokens'] as num?)?.toInt() ??
+        0,
+    cacheCreationInputTokens:
+        (json['cache_creation_input_tokens'] as num?)?.toInt() ??
+        (json['cacheCreationInputTokens'] as num?)?.toInt(),
+    cacheReadInputTokens:
+        (json['cache_read_input_tokens'] as num?)?.toInt() ??
+        (json['cacheReadInputTokens'] as num?)?.toInt(),
+  );
 
   Map<String, dynamic> toJson() => {
-        'input_tokens': inputTokens,
-        'output_tokens': outputTokens,
-        if (cacheCreationInputTokens != null)
-          'cache_creation_input_tokens': cacheCreationInputTokens,
-        if (cacheReadInputTokens != null)
-          'cache_read_input_tokens': cacheReadInputTokens,
-      };
+    'input_tokens': inputTokens,
+    'output_tokens': outputTokens,
+    if (cacheCreationInputTokens != null)
+      'cache_creation_input_tokens': cacheCreationInputTokens,
+    if (cacheReadInputTokens != null)
+      'cache_read_input_tokens': cacheReadInputTokens,
+  };
 }
 
 /// Content block in a message

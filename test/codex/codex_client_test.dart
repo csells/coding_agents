@@ -6,13 +6,8 @@ import 'package:test/test.dart';
 
 void main() {
   group('CodexClient', () {
-    test('constructs with cwd', () {
-      final client = CodexCliAdapter(cwd: '/path/to/project');
-      expect(client.cwd, '/path/to/project');
-    });
-
     test('buildInitialArgs generates correct arguments for default config', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
       final config = CodexSessionConfig();
 
       final args = client.buildInitialArgs('test prompt', config);
@@ -27,7 +22,7 @@ void main() {
     });
 
     test('buildInitialArgs includes fullAuto flag', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
       final config = CodexSessionConfig(fullAuto: true);
 
       final args = client.buildInitialArgs('test prompt', config);
@@ -39,7 +34,7 @@ void main() {
     });
 
     test('buildInitialArgs includes dangerouslyBypassAll flag', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
       final config = CodexSessionConfig(dangerouslyBypassAll: true);
 
       final args = client.buildInitialArgs('test prompt', config);
@@ -48,7 +43,7 @@ void main() {
     });
 
     test('buildInitialArgs includes model when specified', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
       final config = CodexSessionConfig(model: 'o3');
 
       final args = client.buildInitialArgs('test prompt', config);
@@ -58,7 +53,7 @@ void main() {
     });
 
     test('buildInitialArgs includes search flag when enabled', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
       final config = CodexSessionConfig(enableWebSearch: true);
 
       final args = client.buildInitialArgs('test prompt', config);
@@ -67,7 +62,7 @@ void main() {
     });
 
     test('buildInitialArgs includes untrusted approval policy', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
       final config = CodexSessionConfig(
         approvalPolicy: CodexApprovalPolicy.untrusted,
       );
@@ -79,7 +74,7 @@ void main() {
     });
 
     test('buildInitialArgs includes readOnly sandbox mode', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
       final config = CodexSessionConfig(sandboxMode: CodexSandboxMode.readOnly);
 
       final args = client.buildInitialArgs('test prompt', config);
@@ -89,7 +84,7 @@ void main() {
     });
 
     test('buildResumeArgs generates correct arguments', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
       final config = CodexSessionConfig();
 
       final args = client.buildResumeArgs(
@@ -106,7 +101,7 @@ void main() {
     });
 
     test('buildResumeArgs includes fullAuto for resumed session', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
       final config = CodexSessionConfig(fullAuto: true);
 
       final args = client.buildResumeArgs('continue', 'thread_123', config);
@@ -119,7 +114,7 @@ void main() {
 
   group('CodexClient event parsing', () {
     test('parseJsonLine parses valid JSONL', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
       final line = '{"type":"thread.started","thread_id":"thread_123"}';
 
       final event = client.parseJsonLine(line, 'thread_123', 1);
@@ -128,21 +123,21 @@ void main() {
     });
 
     test('parseJsonLine returns null for empty line', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
 
       expect(client.parseJsonLine('', '', 1), isNull);
       expect(client.parseJsonLine('   ', '', 1), isNull);
     });
 
     test('parseJsonLine returns null for non-JSON line', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
 
       expect(client.parseJsonLine('not json', '', 1), isNull);
       expect(client.parseJsonLine('# comment', '', 1), isNull);
     });
 
     test('parseJsonLine throws on malformed JSON', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
 
       expect(
         () => client.parseJsonLine('{malformed', '', 1),
@@ -153,7 +148,7 @@ void main() {
 
   group('CodexClient formatEnumArg', () {
     test('converts camelCase to kebab-case', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
 
       expect(client.formatEnumArg('onRequest'), 'on-request');
       expect(client.formatEnumArg('onFailure'), 'on-failure');
@@ -163,7 +158,7 @@ void main() {
     });
 
     test('handles single word', () {
-      final client = CodexCliAdapter(cwd: '/test');
+      final client = CodexCliAdapter();
 
       expect(client.formatEnumArg('never'), 'never');
       expect(client.formatEnumArg('untrusted'), 'untrusted');

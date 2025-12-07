@@ -174,10 +174,7 @@ void main() {
     });
 
     test('parses result event with cancelled status', () {
-      final json = {
-        'type': 'result',
-        'status': 'cancelled',
-      };
+      final json = {'type': 'result', 'status': 'cancelled'};
 
       final event = GeminiEvent.fromJson(json, 'sess_abc123', 3);
 
@@ -221,10 +218,7 @@ void main() {
     });
 
     test('parses unknown event type gracefully', () {
-      final json = {
-        'type': 'future_event_type',
-        'some_field': 'some_value',
-      };
+      final json = {'type': 'future_event_type', 'some_field': 'some_value'};
 
       final event = GeminiEvent.fromJson(json, 'sess_abc123', 1);
 
@@ -235,10 +229,7 @@ void main() {
     });
 
     test('handles missing optional fields', () {
-      final json = {
-        'type': 'init',
-        'session_id': 'sess_abc123',
-      };
+      final json = {'type': 'init', 'session_id': 'sess_abc123'};
 
       final event = GeminiEvent.fromJson(json, '', 1);
 
@@ -252,17 +243,28 @@ void main() {
       final events = [
         {'type': 'init', 'session_id': 's1'},
         {'type': 'message', 'role': 'user', 'content': 'hi'},
-        {'type': 'tool_use', 'tool_name': 'Bash', 'tool_id': 't1', 'parameters': {}},
+        {
+          'type': 'tool_use',
+          'tool_name': 'Bash',
+          'tool_id': 't1',
+          'parameters': {},
+        },
         {'type': 'tool_result', 'tool_id': 't1', 'status': 'success'},
         {'type': 'result', 'status': 'success'},
-        {'type': 'error', 'error': {'code': 'ERR', 'message': 'msg'}},
+        {
+          'type': 'error',
+          'error': {'code': 'ERR', 'message': 'msg'},
+        },
         {'type': 'retry', 'attempt': 1, 'max_attempts': 3, 'delay_ms': 100},
       ];
 
       for (final eventJson in events) {
         final event = GeminiEvent.fromJson(eventJson, 'sess_test', 42);
-        expect(event.turnId, 42,
-            reason: 'Event type ${eventJson['type']} should preserve turnId');
+        expect(
+          event.turnId,
+          42,
+          reason: 'Event type ${eventJson['type']} should preserve turnId',
+        );
       }
     });
   });

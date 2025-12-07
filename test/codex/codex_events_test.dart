@@ -5,10 +5,7 @@ import 'package:coding_agents/src/cli_adapters/codex/codex_types.dart';
 void main() {
   group('CodexEvent.fromJson', () {
     test('parses thread.started event', () {
-      final json = {
-        'type': 'thread.started',
-        'thread_id': 'thread_abc123',
-      };
+      final json = {'type': 'thread.started', 'thread_id': 'thread_abc123'};
 
       final event = CodexEvent.fromJson(json, '', 1);
 
@@ -61,9 +58,7 @@ void main() {
     test('parses turn.failed event', () {
       final json = {
         'type': 'turn.failed',
-        'error': {
-          'message': 'Tool execution failed: permission denied',
-        },
+        'error': {'message': 'Tool execution failed: permission denied'},
       };
 
       final event = CodexEvent.fromJson(json, 'thread_123', 3);
@@ -76,11 +71,7 @@ void main() {
     test('parses item.started event', () {
       final json = {
         'type': 'item.started',
-        'item': {
-          'type': 'agent_message',
-          'id': 'msg_01',
-          'text': '',
-        },
+        'item': {'type': 'agent_message', 'id': 'msg_01', 'text': ''},
       };
 
       final event = CodexEvent.fromJson(json, 'thread_123', 2);
@@ -105,8 +96,10 @@ void main() {
       expect(event, isA<CodexItemUpdatedEvent>());
       final itemUpdated = event as CodexItemUpdatedEvent;
       expect(itemUpdated.item, isA<CodexAgentMessageItem>());
-      expect((itemUpdated.item as CodexAgentMessageItem).text,
-          'I will analyze the code...');
+      expect(
+        (itemUpdated.item as CodexAgentMessageItem).text,
+        'I will analyze the code...',
+      );
     });
 
     test('parses item.updated event with command_execution', () {
@@ -168,11 +161,7 @@ void main() {
     test('parses item.completed event with success status', () {
       final json = {
         'type': 'item.completed',
-        'item': {
-          'type': 'agent_message',
-          'id': 'msg_01',
-          'text': 'Done!',
-        },
+        'item': {'type': 'agent_message', 'id': 'msg_01', 'text': 'Done!'},
         'status': 'success',
       };
 
@@ -218,10 +207,7 @@ void main() {
     });
 
     test('parses unknown event type gracefully', () {
-      final json = {
-        'type': 'future_event_type',
-        'some_field': 'some_value',
-      };
+      final json = {'type': 'future_event_type', 'some_field': 'some_value'};
 
       final event = CodexEvent.fromJson(json, 'thread_123', 1);
 
@@ -235,17 +221,33 @@ void main() {
         {'type': 'thread.started', 'thread_id': 't1'},
         {'type': 'turn.started'},
         {'type': 'turn.completed'},
-        {'type': 'turn.failed', 'error': {'message': 'err'}},
-        {'type': 'item.started', 'item': {'type': 'agent_message', 'id': '1', 'text': ''}},
-        {'type': 'item.updated', 'item': {'type': 'agent_message', 'id': '1', 'text': ''}},
-        {'type': 'item.completed', 'item': {'type': 'agent_message', 'id': '1', 'text': ''}, 'status': 'success'},
+        {
+          'type': 'turn.failed',
+          'error': {'message': 'err'},
+        },
+        {
+          'type': 'item.started',
+          'item': {'type': 'agent_message', 'id': '1', 'text': ''},
+        },
+        {
+          'type': 'item.updated',
+          'item': {'type': 'agent_message', 'id': '1', 'text': ''},
+        },
+        {
+          'type': 'item.completed',
+          'item': {'type': 'agent_message', 'id': '1', 'text': ''},
+          'status': 'success',
+        },
         {'type': 'error', 'message': 'test'},
       ];
 
       for (final eventJson in events) {
         final event = CodexEvent.fromJson(eventJson, 'thread_test', 42);
-        expect(event.turnId, 42,
-            reason: 'Event type ${eventJson['type']} should preserve turnId');
+        expect(
+          event.turnId,
+          42,
+          reason: 'Event type ${eventJson['type']} should preserve turnId',
+        );
       }
     });
   });

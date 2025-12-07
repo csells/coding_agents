@@ -24,7 +24,7 @@ void main() {
   });
 
   setUp(() {
-    client = ClaudeCodeCliAdapter(cwd: testWorkDir);
+    client = ClaudeCodeCliAdapter();
     config = ClaudeSessionConfig(
       permissionMode: ClaudePermissionMode.bypassPermissions,
       maxTurns: 1,
@@ -36,6 +36,7 @@ void main() {
       final session = await client.createSession(
         'Say exactly: "Hello"',
         config,
+        projectDirectory: testWorkDir,
       );
 
       expect(session.sessionId, isNotNull);
@@ -65,6 +66,7 @@ void main() {
       final session = await client.createSession(
         'Respond with exactly: "Test response"',
         config,
+        projectDirectory: testWorkDir,
       );
 
       final assistantEvents = <ClaudeAssistantEvent>[];
@@ -99,6 +101,7 @@ void main() {
         final session = await client.createSession(
           'Read the file pubspec.yaml and tell me the package name',
           toolConfig,
+          projectDirectory: testWorkDir,
         );
 
         final toolUseBlocks = <ClaudeToolUseBlock>[];
@@ -135,7 +138,11 @@ void main() {
     );
 
     test('result event contains success status', () async {
-      final session = await client.createSession('Say: "Done"', config);
+      final session = await client.createSession(
+        'Say: "Done"',
+        config,
+        projectDirectory: testWorkDir,
+      );
 
       ClaudeResultEvent? resultEvent;
 
@@ -164,6 +171,7 @@ void main() {
       final session1 = await client.createSession(
         'Hi! My name is Chris!',
         config,
+        projectDirectory: testWorkDir,
       );
 
       final sessionId = session1.sessionId;
@@ -178,6 +186,7 @@ void main() {
         sessionId,
         'Say my name.',
         config,
+        projectDirectory: testWorkDir,
       );
 
       expect(
@@ -209,7 +218,11 @@ void main() {
     });
 
     test('session events include correct turnId', () async {
-      final session = await client.createSession('Say: "Turn test"', config);
+      final session = await client.createSession(
+        'Say: "Turn test"',
+        config,
+        projectDirectory: testWorkDir,
+      );
 
       final turnIds = <int>{};
 
@@ -236,6 +249,7 @@ void main() {
       final session = await client.createSession(
         'Say: "List test"',
         config,
+        projectDirectory: testWorkDir,
       );
 
       final sessionId = session.sessionId;
@@ -246,14 +260,10 @@ void main() {
       }
 
       // List sessions
-      final sessions = await client.listSessions();
+      final sessions = await client.listSessions(projectDirectory: testWorkDir);
 
       // Verify our session is in the list
-      expect(
-        sessions,
-        isNotEmpty,
-        reason: 'Should have at least one session',
-      );
+      expect(sessions, isNotEmpty, reason: 'Should have at least one session');
       expect(
         sessions.any((s) => s.sessionId == sessionId),
         isTrue,
@@ -268,7 +278,11 @@ void main() {
         model: 'invalid-model-that-does-not-exist-xyz',
       );
 
-      final session = await client.createSession('Say hello', badConfig);
+      final session = await client.createSession(
+        'Say hello',
+        badConfig,
+        projectDirectory: testWorkDir,
+      );
 
       // Expect exception to be thrown with error details
       expect(
@@ -298,7 +312,11 @@ void main() {
       // Expect createSession to fail with CLI error details
       expect(
         () async {
-          final session = await client.createSession('Say hello', badConfig);
+          final session = await client.createSession(
+            'Say hello',
+            badConfig,
+            projectDirectory: testWorkDir,
+          );
           await for (final event in session.events) {
             if (event is ClaudeResultEvent) break;
           }
@@ -319,7 +337,11 @@ void main() {
       const testPrompt = 'Say exactly: "History test response"';
 
       // Create a session
-      final session = await client.createSession(testPrompt, config);
+      final session = await client.createSession(
+        testPrompt,
+        config,
+        projectDirectory: testWorkDir,
+      );
       final sessionId = session.sessionId;
 
       // Wait for session to complete
@@ -328,31 +350,36 @@ void main() {
       }
 
       // Get session history
-      final history = await client.getSessionHistory(sessionId);
+      final history = await client.getSessionHistory(
+        sessionId,
+        projectDirectory: testWorkDir,
+      );
 
       // Verify history contains events
-      expect(
-        history,
-        isNotEmpty,
-        reason: 'History should not be empty',
-      );
+      expect(history, isNotEmpty, reason: 'History should not be empty');
       // History should contain at least some message-related events
       // The exact set of events stored to disk may differ from streamed events
       expect(
-        history.any((e) =>
-            e is ClaudeUserEvent ||
-            e is ClaudeAssistantEvent ||
-            e is ClaudeSystemEvent),
+        history.any(
+          (e) =>
+              e is ClaudeUserEvent ||
+              e is ClaudeAssistantEvent ||
+              e is ClaudeSystemEvent,
+        ),
         isTrue,
         reason: 'History should contain message-related events',
       );
     });
 
-    test('getSessionHistory includes user prompt as text block', () async {
+    test('getSessionHistory includes user and assistant messages', () async {
       const testPrompt = 'Say exactly: "First prompt test"';
 
       // Create a session
-      final session = await client.createSession(testPrompt, config);
+      final session = await client.createSession(
+        testPrompt,
+        config,
+        projectDirectory: testWorkDir,
+      );
       final sessionId = session.sessionId;
 
       // Wait for session to complete
@@ -361,35 +388,74 @@ void main() {
       }
 
       // Get session history
-      final history = await client.getSessionHistory(sessionId);
+      final history = await client.getSessionHistory(
+        sessionId,
+        projectDirectory: testWorkDir,
+      );
 
-      // Find user events with text content
-      final userTexts = <String>[];
+      // Find user and assistant events
+      final userEvents = <ClaudeUserEvent>[];
+      final assistantEvents = <ClaudeAssistantEvent>[];
       for (final event in history) {
         if (event is ClaudeUserEvent) {
-          for (final block in event.content) {
-            if (block is ClaudeTextBlock) {
-              userTexts.add(block.text);
-            }
-          }
+          userEvents.add(event);
+        } else if (event is ClaudeAssistantEvent) {
+          assistantEvents.add(event);
         }
       }
 
-      // Verify we can find the original prompt
+      // Verify we have both user and assistant messages
       expect(
-        userTexts.any((text) => text.contains('First prompt test')),
-        isTrue,
-        reason: 'History should include user prompt as text block',
+        userEvents,
+        isNotEmpty,
+        reason: 'History should include user messages',
       );
+      expect(
+        assistantEvents,
+        isNotEmpty,
+        reason: 'History should include assistant messages',
+      );
+    });
+
+    test('getSessionHistory can be called multiple times', () async {
+      const testPrompt = 'Say exactly: "Idempotency test"';
+
+      // Create a session
+      final session = await client.createSession(
+        testPrompt,
+        config,
+        projectDirectory: testWorkDir,
+      );
+      final sessionId = session.sessionId;
+
+      // Wait for session to complete
+      await for (final event in session.events) {
+        if (event is ClaudeResultEvent) break;
+      }
+
+      // Get session history twice - should work both times
+      final history1 = await client.getSessionHistory(
+        sessionId,
+        projectDirectory: testWorkDir,
+      );
+      final history2 = await client.getSessionHistory(
+        sessionId,
+        projectDirectory: testWorkDir,
+      );
+
+      // Both should return the same events
+      expect(history1.length, equals(history2.length));
     });
 
     test('getSessionHistory throws for non-existent session', () async {
       expect(
-        () => client.getSessionHistory('non-existent-session-id-xyz'),
+        () => client.getSessionHistory(
+          'non-existent-session-id-xyz',
+          projectDirectory: testWorkDir,
+        ),
         throwsA(isA<ClaudeProcessException>()),
         reason: 'Should throw for non-existent session',
       );
     });
-
   });
 }

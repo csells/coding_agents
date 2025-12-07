@@ -8,13 +8,8 @@ import 'package:test/test.dart';
 
 void main() {
   group('ClaudeClient', () {
-    test('constructs with cwd', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/path/to/project');
-      expect(client.cwd, '/path/to/project');
-    });
-
     test('buildArgs generates correct arguments for default config', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig();
 
       final args = client.buildArgs(config, 'test prompt', null);
@@ -26,7 +21,7 @@ void main() {
     });
 
     test('buildArgs includes resume flag when sessionId provided', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig();
 
       final args = client.buildArgs(config, 'continue', 'sess_abc123');
@@ -36,7 +31,7 @@ void main() {
     });
 
     test('buildArgs includes acceptEdits permission mode', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(
         permissionMode: ClaudePermissionMode.acceptEdits,
       );
@@ -48,7 +43,7 @@ void main() {
     });
 
     test('buildArgs includes bypassPermissions mode', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(
         permissionMode: ClaudePermissionMode.bypassPermissions,
       );
@@ -59,7 +54,7 @@ void main() {
     });
 
     test('buildArgs includes delegate permission mode with MCP tool', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(
         permissionMode: ClaudePermissionMode.delegate,
         permissionHandler: (_) async => ClaudeToolPermissionResponse(
@@ -74,7 +69,7 @@ void main() {
     });
 
     test('buildArgs includes model when specified', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(model: 'claude-opus-4-5-20251101');
 
       final args = client.buildArgs(config, 'test', null);
@@ -84,7 +79,7 @@ void main() {
     });
 
     test('buildArgs includes system prompt when specified', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(
         systemPrompt: 'You are a code reviewer.',
       );
@@ -96,7 +91,7 @@ void main() {
     });
 
     test('buildArgs includes append system prompt when specified', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(appendSystemPrompt: 'Be concise.');
 
       final args = client.buildArgs(config, 'test', null);
@@ -106,7 +101,7 @@ void main() {
     });
 
     test('buildArgs includes maxTurns when specified', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(maxTurns: 5);
 
       final args = client.buildArgs(config, 'test', null);
@@ -116,7 +111,7 @@ void main() {
     });
 
     test('buildArgs includes allowed tools when specified', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(allowedTools: ['Read', 'Edit']);
 
       final args = client.buildArgs(config, 'test', null);
@@ -127,7 +122,7 @@ void main() {
     });
 
     test('buildArgs includes disallowed tools when specified', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(disallowedTools: ['Bash', 'Write']);
 
       final args = client.buildArgs(config, 'test', null);
@@ -140,7 +135,7 @@ void main() {
 
   group('ClaudeClient event parsing', () {
     test('parseJsonLine parses valid JSONL', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
       final line = '{"type":"init","session_id":"sess_123"}';
 
       final event = client.parseJsonLine(line, 1);
@@ -149,21 +144,21 @@ void main() {
     });
 
     test('parseJsonLine returns null for empty line', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
 
       expect(client.parseJsonLine('', 1), isNull);
       expect(client.parseJsonLine('   ', 1), isNull);
     });
 
     test('parseJsonLine returns null for non-JSON line', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
 
       expect(client.parseJsonLine('not json', 1), isNull);
       expect(client.parseJsonLine('# comment', 1), isNull);
     });
 
     test('parseJsonLine throws on malformed JSON', () {
-      final client = ClaudeCodeCliAdapter(cwd: '/test');
+      final client = ClaudeCodeCliAdapter();
 
       expect(
         () => client.parseJsonLine('{malformed', 1),

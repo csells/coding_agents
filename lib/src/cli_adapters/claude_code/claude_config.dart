@@ -1,9 +1,10 @@
 import 'claude_types.dart';
 
 /// Handler type for permission delegation
-typedef ClaudePermissionHandler = Future<ClaudeToolPermissionResponse> Function(
-  ClaudeToolPermissionRequest request,
-);
+typedef ClaudePermissionHandler =
+    Future<ClaudeToolPermissionResponse> Function(
+      ClaudeToolPermissionRequest request,
+    );
 
 /// Configuration for a Claude Code session
 class ClaudeSessionConfig {

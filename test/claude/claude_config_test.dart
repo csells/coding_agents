@@ -35,7 +35,8 @@ void main() {
 
     test('constructs with delegate mode and handler', () {
       Future<ClaudeToolPermissionResponse> handler(
-          ClaudeToolPermissionRequest req) async {
+        ClaudeToolPermissionRequest req,
+      ) async {
         return ClaudeToolPermissionResponse(
           behavior: ClaudePermissionBehavior.allow,
         );
@@ -52,17 +53,14 @@ void main() {
 
     test('throws when delegate mode used without handler', () {
       expect(
-        () => ClaudeSessionConfig(
-          permissionMode: ClaudePermissionMode.delegate,
-        ),
+        () =>
+            ClaudeSessionConfig(permissionMode: ClaudePermissionMode.delegate),
         throwsA(isA<ArgumentError>()),
       );
     });
 
     test('constructs with model', () {
-      final config = ClaudeSessionConfig(
-        model: 'claude-sonnet-4-5-20250929',
-      );
+      final config = ClaudeSessionConfig(model: 'claude-sonnet-4-5-20250929');
 
       expect(config.model, 'claude-sonnet-4-5-20250929');
     });
@@ -100,9 +98,7 @@ void main() {
     });
 
     test('constructs with disallowed tools', () {
-      final config = ClaudeSessionConfig(
-        disallowedTools: ['Bash', 'Write'],
-      );
+      final config = ClaudeSessionConfig(disallowedTools: ['Bash', 'Write']);
 
       expect(config.disallowedTools, hasLength(2));
       expect(config.disallowedTools, contains('Bash'));
@@ -110,7 +106,8 @@ void main() {
 
     test('constructs with all options', () {
       Future<ClaudeToolPermissionResponse> handler(
-          ClaudeToolPermissionRequest req) async {
+        ClaudeToolPermissionRequest req,
+      ) async {
         return ClaudeToolPermissionResponse(
           behavior: ClaudePermissionBehavior.allow,
         );

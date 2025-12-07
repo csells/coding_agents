@@ -1,62 +1,94 @@
 /// Simple interactive CLI for Gemini
-///
-/// Usage:
-///   dart run example/simple_cli/gemini_cli.dart [options]
-///
-/// Options:
-///   -d, --project-directory  Working directory (default: current directory)
-///   -p, --prompt             Execute a single prompt and exit
-///   -s, --list-sessions      List available sessions
-///   -r, --resume-session     Resume a session by ID
-///   -y, --yolo               Skip permission prompts
-///
-/// Examples:
-///   dart run example/simple_cli/gemini_cli.dart
-///   dart run example/simple_cli/gemini_cli.dart -p "What is 2+2?"
-///   dart run example/simple_cli/gemini_cli.dart -s
-///   dart run example/simple_cli/gemini_cli.dart -r abc123-def456
-///   dart run example/simple_cli/gemini_cli.dart -r abc123 -p "Continue"
 library;
 
 import 'dart:io';
 
 import 'package:coding_agents/coding_agents.dart';
 
+void _printHelp() {
+  print('''
+Gemini CLI - Simple interactive CLI for Gemini
+
+Usage:
+  dart run gemini_cli.dart [options]
+
+Options:
+  -h, --help               Show this help message
+  -d, --project-directory  Working directory (default: current directory)
+  -p, --prompt             Execute a single prompt and exit
+  -l, --list-sessions      List available sessions
+  -r, --resume-session     Resume a session by ID
+  -y, --yolo               Skip permission prompts
+
+Examples:
+  dart run gemini_cli.dart
+  dart run gemini_cli.dart -p "What is 2+2?"
+  dart run gemini_cli.dart -l
+  dart run gemini_cli.dart -r abc123-def456
+  dart run gemini_cli.dart -r abc123 -p "Continue"
+''');
+}
+
+void _printReplHelp() {
+  print('''
+Available commands:
+  /help   Show this help message
+  /exit   Exit the REPL
+  /quit   Exit the REPL
+''');
+}
+
 Future<void> main(List<String> args) async {
   final parsed = _parseArgs(args);
+
+  if (parsed.showHelp) {
+    _printHelp();
+    return;
+  }
+
   final projectDir = parsed.projectDirectory ?? Directory.current.path;
-  final client = GeminiCliAdapter(cwd: projectDir);
+  final client = GeminiCliAdapter();
 
   if (parsed.listSessions) {
-    await _listSessions(client);
+    await _listSessions(client, projectDir);
     return;
   }
 
   if (parsed.resumeSession != null) {
     if (parsed.prompt != null) {
       // One-shot with resumed session
-      await _oneShot(client, parsed.prompt!, parsed.yolo,
-          sessionId: parsed.resumeSession);
+      await _oneShot(
+        client,
+        parsed.prompt!,
+        parsed.yolo,
+        projectDir,
+        sessionId: parsed.resumeSession,
+      );
     } else {
       // REPL with resumed session
-      await _showHistory(client, parsed.resumeSession!);
-      await _repl(client, parsed.yolo, sessionId: parsed.resumeSession);
+      await _showHistory(client, parsed.resumeSession!, projectDir);
+      await _repl(
+        client,
+        parsed.yolo,
+        projectDir,
+        sessionId: parsed.resumeSession,
+      );
     }
     return;
   }
 
   if (parsed.prompt != null) {
     // One-shot mode
-    await _oneShot(client, parsed.prompt!, parsed.yolo);
+    await _oneShot(client, parsed.prompt!, parsed.yolo, projectDir);
     return;
   }
 
   // Interactive REPL mode
-  await _repl(client, parsed.yolo);
+  await _repl(client, parsed.yolo, projectDir);
 }
 
-Future<void> _listSessions(GeminiCliAdapter client) async {
-  final sessions = await client.listSessions();
+Future<void> _listSessions(GeminiCliAdapter client, String projectDir) async {
+  final sessions = await client.listSessions(projectDirectory: projectDir);
 
   if (sessions.isEmpty) {
     print('No sessions found.');
@@ -69,7 +101,10 @@ Future<void> _listSessions(GeminiCliAdapter client) async {
   for (final session in sessions) {
     // Get the first prompt from history
     String firstPrompt = '(no prompt)';
-    final history = await client.getSessionHistory(session.sessionId);
+    final history = await client.getSessionHistory(
+      session.sessionId,
+      projectDirectory: projectDir,
+    );
     for (final event in history) {
       if (event is GeminiMessageEvent && event.role == 'user') {
         firstPrompt = event.content;
@@ -87,11 +122,18 @@ Future<void> _listSessions(GeminiCliAdapter client) async {
   }
 }
 
-Future<void> _showHistory(GeminiCliAdapter client, String sessionId) async {
+Future<void> _showHistory(
+  GeminiCliAdapter client,
+  String sessionId,
+  String projectDir,
+) async {
   print('Loading session history...');
   print('');
 
-  final history = await client.getSessionHistory(sessionId);
+  final history = await client.getSessionHistory(
+    sessionId,
+    projectDirectory: projectDir,
+  );
 
   for (final event in history) {
     switch (event) {
@@ -102,9 +144,13 @@ Future<void> _showHistory(GeminiCliAdapter client, String sessionId) async {
           print('Gemini: ${event.content}');
         }
       case GeminiToolUseEvent():
-        print('Tool: ${event.toolUse.toolName}(${_formatParams(event.toolUse.parameters)})');
+        print(
+          'Tool: ${event.toolUse.toolName}(${_formatParams(event.toolUse.parameters)})',
+        );
       case GeminiToolResultEvent():
-        print('Tool Result [${event.toolResult.status}]: ${_truncate(event.toolResult.output ?? '', 200)}');
+        print(
+          'Tool Result [${event.toolResult.status}]: ${_truncate(event.toolResult.output ?? '', 200)}',
+        );
       case GeminiResultEvent():
         print('--- Turn complete ---');
       default:
@@ -120,16 +166,28 @@ Future<void> _showHistory(GeminiCliAdapter client, String sessionId) async {
 Future<void> _oneShot(
   GeminiCliAdapter client,
   String prompt,
-  bool yolo, {
+  bool yolo,
+  String projectDir, {
   String? sessionId,
 }) async {
   final config = GeminiSessionConfig(
-    approvalMode: yolo ? GeminiApprovalMode.yolo : GeminiApprovalMode.defaultMode,
+    approvalMode: yolo
+        ? GeminiApprovalMode.yolo
+        : GeminiApprovalMode.defaultMode,
   );
 
   final session = sessionId != null
-      ? await client.resumeSession(sessionId, prompt, config)
-      : await client.createSession(prompt, config);
+      ? await client.resumeSession(
+          sessionId,
+          prompt,
+          config,
+          projectDirectory: projectDir,
+        )
+      : await client.createSession(
+          prompt,
+          config,
+          projectDirectory: projectDir,
+        );
 
   await for (final event in session.events) {
     switch (event) {
@@ -153,11 +211,13 @@ Future<void> _oneShot(
 
 Future<void> _repl(
   GeminiCliAdapter client,
-  bool yolo, {
+  bool yolo,
+  String projectDir, {
   String? sessionId,
 }) async {
-  print('Gemini CLI (type "exit" to quit)');
+  print('Gemini CLI');
   print('');
+  _printReplHelp();
 
   String? currentSessionId = sessionId;
 
@@ -165,20 +225,42 @@ Future<void> _repl(
     stdout.write('You: ');
     final input = stdin.readLineSync();
 
-    if (input == null || input.toLowerCase() == 'exit') {
+    if (input == null) {
       print('Goodbye!');
       break;
+    }
+
+    final trimmed = input.trim().toLowerCase();
+    if (trimmed == '/exit' || trimmed == '/quit') {
+      print('Goodbye!');
+      break;
+    }
+
+    if (trimmed == '/help') {
+      _printReplHelp();
+      continue;
     }
 
     if (input.trim().isEmpty) continue;
 
     final config = GeminiSessionConfig(
-      approvalMode: yolo ? GeminiApprovalMode.yolo : GeminiApprovalMode.defaultMode,
+      approvalMode: yolo
+          ? GeminiApprovalMode.yolo
+          : GeminiApprovalMode.defaultMode,
     );
 
     final session = currentSessionId != null
-        ? await client.resumeSession(currentSessionId, input, config)
-        : await client.createSession(input, config);
+        ? await client.resumeSession(
+            currentSessionId,
+            input,
+            config,
+            projectDirectory: projectDir,
+          )
+        : await client.createSession(
+            input,
+            config,
+            projectDirectory: projectDir,
+          );
 
     currentSessionId = session.sessionId;
 
@@ -211,7 +293,9 @@ String _truncate(String text, int maxLength) {
 }
 
 String _formatParams(Map<String, dynamic> params) {
-  final entries = params.entries.take(3).map((e) => '${e.key}: ${_truncate(e.value.toString(), 30)}');
+  final entries = params.entries
+      .take(3)
+      .map((e) => '${e.key}: ${_truncate(e.value.toString(), 30)}');
   return entries.join(', ');
 }
 
@@ -221,6 +305,7 @@ class _ParsedArgs {
   final bool listSessions;
   final String? resumeSession;
   final bool yolo;
+  final bool showHelp;
 
   _ParsedArgs({
     this.projectDirectory,
@@ -228,6 +313,7 @@ class _ParsedArgs {
     this.listSessions = false,
     this.resumeSession,
     this.yolo = false,
+    this.showHelp = false,
   });
 }
 
@@ -237,11 +323,15 @@ _ParsedArgs _parseArgs(List<String> args) {
   bool listSessions = false;
   String? resumeSession;
   bool yolo = false;
+  bool showHelp = false;
 
   for (var i = 0; i < args.length; i++) {
     final arg = args[i];
 
     switch (arg) {
+      case '-h':
+      case '--help':
+        showHelp = true;
       case '-d':
       case '--project-directory':
         if (i + 1 < args.length) {
@@ -252,7 +342,7 @@ _ParsedArgs _parseArgs(List<String> args) {
         if (i + 1 < args.length) {
           prompt = args[++i];
         }
-      case '-s':
+      case '-l':
       case '--list-sessions':
         listSessions = true;
       case '-r':
@@ -272,5 +362,6 @@ _ParsedArgs _parseArgs(List<String> args) {
     listSessions: listSessions,
     resumeSession: resumeSession,
     yolo: yolo,
+    showHelp: showHelp,
   );
 }

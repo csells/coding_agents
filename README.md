@@ -47,14 +47,18 @@ dependencies:
 ```dart
 import 'package:coding_agents/coding_agents.dart';
 
-final client = ClaudeCodeCliAdapter(cwd: '/path/to/project');
+final client = ClaudeCodeCliAdapter();
 
 final config = ClaudeSessionConfig(
   permissionMode: ClaudePermissionMode.bypassPermissions,
   maxTurns: 1,
 );
 
-final session = await client.createSession('Hello!', config);
+final session = await client.createSession(
+  'Hello!',
+  config,
+  projectDirectory: '/path/to/project',
+);
 print('Session ID: ${session.sessionId}');
 
 await for (final event in session.events) {
@@ -74,11 +78,15 @@ await for (final event in session.events) {
 ```dart
 import 'package:coding_agents/coding_agents.dart';
 
-final client = CodexCliAdapter(cwd: '/path/to/project');
+final client = CodexCliAdapter();
 
 final config = CodexSessionConfig(fullAuto: true);
 
-final session = await client.createSession('Hello!', config);
+final session = await client.createSession(
+  'Hello!',
+  config,
+  projectDirectory: '/path/to/project',
+);
 print('Thread ID: ${session.threadId}');
 
 await for (final event in session.events) {
@@ -94,14 +102,18 @@ await for (final event in session.events) {
 ```dart
 import 'package:coding_agents/coding_agents.dart';
 
-final client = GeminiCliAdapter(cwd: '/path/to/project');
+final client = GeminiCliAdapter();
 
 final config = GeminiSessionConfig(
   approvalMode: GeminiApprovalMode.yolo,
   sandbox: true,
 );
 
-final session = await client.createSession('Hello!', config);
+final session = await client.createSession(
+  'Hello!',
+  config,
+  projectDirectory: '/path/to/project',
+);
 print('Session ID: ${session.sessionId}');
 
 await for (final event in session.events) {
@@ -117,8 +129,14 @@ await for (final event in session.events) {
 All adapters support multi-turn conversations via `resumeSession`:
 
 ```dart
+const projectDir = '/path/to/project';
+
 // First turn
-final session1 = await client.createSession('Remember: XYZ', config);
+final session1 = await client.createSession(
+  'Remember: XYZ',
+  config,
+  projectDirectory: projectDir,
+);
 final sessionId = session1.sessionId;
 await for (final event in session1.events) {
   if (event is ClaudeResultEvent) break;
@@ -129,6 +147,7 @@ final session2 = await client.resumeSession(
   sessionId,
   'What did I ask you to remember?',
   config,
+  projectDirectory: projectDir,
 );
 ```
 
@@ -137,8 +156,10 @@ final session2 = await client.resumeSession(
 All adapters support discovering existing sessions via `listSessions`:
 
 ```dart
-// List all sessions for this working directory
-final sessions = await client.listSessions();
+// List all sessions for a project directory
+final sessions = await client.listSessions(
+  projectDirectory: '/path/to/project',
+);
 
 for (final info in sessions) {
   print('Session: ${info.sessionId}');
@@ -156,8 +177,11 @@ final targetSession = sessions.firstWhere(
 All adapters support fetching the full event history for a session:
 
 ```dart
-// Get all events from a session
-final history = await client.getSessionHistory(sessionId);
+// Get all events from a session (Claude requires projectDirectory)
+final history = await client.getSessionHistory(
+  sessionId,
+  projectDirectory: '/path/to/project',
+);
 
 for (final event in history) {
   if (event is ClaudeUserEvent) {
@@ -204,10 +228,11 @@ dart run example/simple_cli/gemini_cli.dart
 
 | Flag                  | Short | Description                                       |
 | --------------------- | ----- | ------------------------------------------------- |
+| `--help`              | `-h`  | Show help message                                 |
 | (none)                |       | Interactive multi-turn REPL                       |
 | `--project-directory` | `-d`  | Working directory (default: cwd)                  |
 | `--prompt`            | `-p`  | Execute a single prompt and exit                  |
-| `--list-sessions`     | `-s`  | List sessions with ID, first prompt, last updated |
+| `--list-sessions`     | `-l`  | List sessions with ID, first prompt, last updated |
 | `--resume-session`    | `-r`  | Resume a session by ID                            |
 | `--yolo`              | `-y`  | Permissive mode (bypass approvals)                |
 
@@ -217,11 +242,14 @@ dart run example/simple_cli/gemini_cli.dart
 # Interactive REPL
 dart run example/simple_cli/claude_cli.dart
 
+# Show help
+dart run example/simple_cli/claude_cli.dart --help
+
 # One-shot prompt
 dart run example/simple_cli/claude_cli.dart -p "What is 2+2?"
 
 # List sessions
-dart run example/simple_cli/claude_cli.dart -s
+dart run example/simple_cli/claude_cli.dart -l
 
 # Resume session (shows history, then enters REPL)
 dart run example/simple_cli/claude_cli.dart -r <session-id>

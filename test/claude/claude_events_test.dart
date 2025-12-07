@@ -30,10 +30,7 @@ void main() {
           'content': [
             {'type': 'text', 'text': 'Hello, I can help you with that.'},
           ],
-          'usage': {
-            'inputTokens': 100,
-            'outputTokens': 50,
-          },
+          'usage': {'inputTokens': 100, 'outputTokens': 50},
         },
       };
 
@@ -43,8 +40,10 @@ void main() {
       final assistantEvent = event as ClaudeAssistantEvent;
       expect(assistantEvent.content, hasLength(1));
       expect(assistantEvent.content.first, isA<ClaudeTextBlock>());
-      expect((assistantEvent.content.first as ClaudeTextBlock).text,
-          'Hello, I can help you with that.');
+      expect(
+        (assistantEvent.content.first as ClaudeTextBlock).text,
+        'Hello, I can help you with that.',
+      );
       expect(assistantEvent.usage?.inputTokens, 100);
       expect(assistantEvent.usage?.outputTokens, 50);
     });
@@ -116,10 +115,7 @@ void main() {
         'subtype': 'success',
         'cost_usd': 0.0025,
         'duration_ms': 5000,
-        'usage': {
-          'inputTokens': 1000,
-          'outputTokens': 500,
-        },
+        'usage': {'inputTokens': 1000, 'outputTokens': 500},
       };
 
       final event = ClaudeEvent.fromJson(json, 3);
@@ -204,10 +200,7 @@ void main() {
     });
 
     test('handles missing optional fields', () {
-      final json = {
-        'type': 'init',
-        'session_id': 'sess_abc123',
-      };
+      final json = {'type': 'init', 'session_id': 'sess_abc123'};
 
       final event = ClaudeEvent.fromJson(json, 1);
 
@@ -220,15 +213,27 @@ void main() {
     test('preserves turnId across all event types', () {
       final events = [
         {'type': 'init', 'session_id': 's1'},
-        {'type': 'assistant', 'session_id': 's1', 'message': {'content': []}},
-        {'type': 'user', 'session_id': 's1', 'message': {'content': []}},
+        {
+          'type': 'assistant',
+          'session_id': 's1',
+          'message': {'content': []},
+        },
+        {
+          'type': 'user',
+          'session_id': 's1',
+          'message': {'content': []},
+        },
         {'type': 'result', 'session_id': 's1', 'subtype': 'success'},
         {'type': 'system', 'session_id': 's1', 'subtype': 'init'},
       ];
 
       for (var i = 0; i < events.length; i++) {
         final event = ClaudeEvent.fromJson(events[i], 42);
-        expect(event.turnId, 42, reason: 'Event type ${events[i]['type']} should preserve turnId');
+        expect(
+          event.turnId,
+          42,
+          reason: 'Event type ${events[i]['type']} should preserve turnId',
+        );
       }
     });
   });

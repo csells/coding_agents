@@ -5,20 +5,44 @@ void main() {
   group('ClaudePermissionMode', () {
     test('has all expected values', () {
       expect(ClaudePermissionMode.values, hasLength(4));
-      expect(ClaudePermissionMode.values, contains(ClaudePermissionMode.defaultMode));
-      expect(ClaudePermissionMode.values, contains(ClaudePermissionMode.acceptEdits));
-      expect(ClaudePermissionMode.values, contains(ClaudePermissionMode.bypassPermissions));
-      expect(ClaudePermissionMode.values, contains(ClaudePermissionMode.delegate));
+      expect(
+        ClaudePermissionMode.values,
+        contains(ClaudePermissionMode.defaultMode),
+      );
+      expect(
+        ClaudePermissionMode.values,
+        contains(ClaudePermissionMode.acceptEdits),
+      );
+      expect(
+        ClaudePermissionMode.values,
+        contains(ClaudePermissionMode.bypassPermissions),
+      );
+      expect(
+        ClaudePermissionMode.values,
+        contains(ClaudePermissionMode.delegate),
+      );
     });
   });
 
   group('ClaudePermissionBehavior', () {
     test('has all expected values', () {
       expect(ClaudePermissionBehavior.values, hasLength(4));
-      expect(ClaudePermissionBehavior.values, contains(ClaudePermissionBehavior.allow));
-      expect(ClaudePermissionBehavior.values, contains(ClaudePermissionBehavior.deny));
-      expect(ClaudePermissionBehavior.values, contains(ClaudePermissionBehavior.allowAlways));
-      expect(ClaudePermissionBehavior.values, contains(ClaudePermissionBehavior.denyAlways));
+      expect(
+        ClaudePermissionBehavior.values,
+        contains(ClaudePermissionBehavior.allow),
+      );
+      expect(
+        ClaudePermissionBehavior.values,
+        contains(ClaudePermissionBehavior.deny),
+      );
+      expect(
+        ClaudePermissionBehavior.values,
+        contains(ClaudePermissionBehavior.allowAlways),
+      );
+      expect(
+        ClaudePermissionBehavior.values,
+        contains(ClaudePermissionBehavior.denyAlways),
+      );
     });
   });
 

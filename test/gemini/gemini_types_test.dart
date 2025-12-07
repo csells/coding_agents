@@ -5,7 +5,10 @@ void main() {
   group('GeminiApprovalMode', () {
     test('has all expected values', () {
       expect(GeminiApprovalMode.values, hasLength(3));
-      expect(GeminiApprovalMode.values, contains(GeminiApprovalMode.defaultMode));
+      expect(
+        GeminiApprovalMode.values,
+        contains(GeminiApprovalMode.defaultMode),
+      );
       expect(GeminiApprovalMode.values, contains(GeminiApprovalMode.autoEdit));
       expect(GeminiApprovalMode.values, contains(GeminiApprovalMode.yolo));
     });

@@ -28,11 +28,7 @@ sealed class GeminiEvent {
       case 'init':
         final sid = json['session_id'] as String? ?? sessionId;
         final model = json['model'] as String? ?? '';
-        return GeminiInitEvent(
-          sessionId: sid,
-          turnId: turnId,
-          model: model,
-        );
+        return GeminiInitEvent(sessionId: sid, turnId: turnId, model: model);
 
       case 'message':
         final role = json['role'] as String? ?? 'unknown';
