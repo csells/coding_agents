@@ -137,6 +137,36 @@ void main() {
       },
     );
 
+    test('permission handler is invoked in delegate mode', () async {
+      var approvals = 0;
+      final toolConfig = ClaudeSessionConfig(
+        permissionMode: ClaudePermissionMode.defaultMode,
+        permissionHandler: (request) async {
+          approvals++;
+          return ClaudeToolPermissionResponse(
+            behavior: ClaudePermissionBehavior.allow,
+          );
+        },
+        maxTurns: 2,
+      );
+
+      final session = await client.createSession(
+        'Read the file pubspec.yaml and tell me the package name',
+        toolConfig,
+        projectDirectory: testWorkDir,
+      );
+
+      await for (final event in session.events) {
+        if (event is ClaudeResultEvent) break;
+      }
+
+      expect(
+        approvals,
+        greaterThan(0),
+        reason: 'Delegate permission handler should be invoked in non-yolo mode',
+      );
+    });
+
     test('result event contains success status', () async {
       final session = await client.createSession(
         'Say: "Done"',

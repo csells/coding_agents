@@ -3,6 +3,7 @@
 /// Supports Claude, Codex, and Gemini via the --agent flag.
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:coding_agents/src/coding_agent/coding_agents.dart';
@@ -193,32 +194,50 @@ Future<void> _oneShot(
       : await agent.createSession(projectDirectory: projectDir);
 
   // Subscribe to events before sending message
-  final eventSubscription = session.events.listen((event) {
-    switch (event) {
-      case CodingAgentTextEvent():
-        stdout.write(event.text);
-      case CodingAgentThinkingEvent():
-        // Optionally show thinking
-        break;
-      case CodingAgentToolUseEvent():
-        print('\n[Tool: ${event.toolName}]');
-      case CodingAgentToolResultEvent():
-        // Tool results are internal
-        break;
-      case CodingAgentTurnEndEvent():
-        print('');
-      case CodingAgentErrorEvent():
-        print('\nError: ${event.message}');
-      default:
-        break;
-    }
-  });
+  final turnCompleted = Completer<void>();
+  var sawPartialText = false;
+  final eventSubscription = session.events.listen(
+    (event) {
+      switch (event) {
+        case CodingAgentTextEvent():
+          if (event.isPartial) {
+            sawPartialText = true;
+            stdout.write(event.text);
+          } else if (!sawPartialText) {
+            stdout.write(event.text);
+          }
+        case CodingAgentThinkingEvent():
+          // Optionally show thinking
+          break;
+        case CodingAgentToolUseEvent():
+          print('\n[Tool: ${event.toolName}]');
+        case CodingAgentToolResultEvent():
+          // Tool results are internal
+          break;
+        case CodingAgentTurnEndEvent():
+          print('');
+          sawPartialText = false;
+          if (!turnCompleted.isCompleted) turnCompleted.complete();
+        case CodingAgentErrorEvent():
+          print('\nError: ${event.message}');
+          if (!turnCompleted.isCompleted) turnCompleted.completeError(Exception(event.message));
+        default:
+          break;
+      }
+    },
+    onError: (Object error, StackTrace stackTrace) {
+      if (!turnCompleted.isCompleted) {
+        turnCompleted.completeError(error, stackTrace);
+      }
+    },
+  );
 
   // Send the message
   await session.sendMessage(prompt);
 
-  // Wait for events to complete
-  await eventSubscription.asFuture<void>();
+  // Wait for the current turn to finish (a turn end or error event)
+  await turnCompleted.future;
+  await eventSubscription.cancel();
   await session.close();
 }
 
@@ -269,10 +288,16 @@ Future<void> _repl(
     await session.sendMessage(input);
 
     // Process events until turn ends
+    var sawPartialText = false;
     await for (final event in session.events) {
       switch (event) {
         case CodingAgentTextEvent():
-          stdout.write(event.text);
+          if (event.isPartial) {
+            sawPartialText = true;
+            stdout.write(event.text);
+          } else if (!sawPartialText) {
+            stdout.write(event.text);
+          }
         case CodingAgentThinkingEvent():
           // Optionally show thinking
           break;

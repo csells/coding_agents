@@ -62,9 +62,14 @@ class CodexSession {
   /// Creates a new turn with the given prompt.
   Future<void> send(String prompt) async {
     incrementTurnId();
-    final request = _buildRpcRequest('createTurn', {
-      'thread_id': threadId,
-      'message': prompt,
+    final request = _buildRpcRequest('sendUserMessage', {
+      'conversationId': threadId,
+      'items': [
+        {
+          'type': 'text',
+          'data': {'text': prompt},
+        },
+      ],
     });
     await _sendRpcRequest(request);
   }

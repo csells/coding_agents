@@ -712,7 +712,22 @@ Codex CLI supports two execution modes:
 ### 4.2 App-Server Mode (Recommended)
 
 The app-server provides a JSON-RPC interface over stdio for IDE integration and
-programmatic access.
+programmatic access. **There are two protocols in use:**
+
+- **Shipping app-server protocol (CLI 0.44.0):** `initialize` →
+  `newConversation`/`resumeConversation` → `addConversationListener` →
+  `sendUserMessage`. Notifications arrive as `codex/event/*` when
+  `experimentalRawEvents` is `false` (task_started, agent_reasoning_delta,
+  agent_message_delta, agent_message, token_count, task_complete, etc.).
+- **Planned v2 (not accepted by CLI 0.44.0):** `thread/start`, `thread/resume`,
+  `turn/start`, `turn/interrupt`, with notifications such as `thread/started`,
+  `turn/started`, `turn/completed`, `item/agentMessage/delta`, etc. Approvals
+  arrive as JSON-RPC requests (`item/commandExecution/requestApproval`,
+  `item/fileChange/requestApproval`).
+
+Older stdio RPCs like `createThread`/`resumeThread`/`createTurn` belong to the
+non-app-server JSONL flow and remain only for backward compatibility when
+parsing archived session logs.
 
 **Starting the app-server:**
 ```bash
@@ -731,25 +746,63 @@ codex app-server [options]
 | `--search`                                 |       | Enable web search                 |
 | `-c <key=value>`                           |       | Config overrides                  |
 
-**JSON-RPC Communication:**
+#### Current app-server methods (CLI 0.44.0)
 
-Input (stdin):
+| Method                   | Description                       | Parameters (camelCase)                     |
+| ------------------------ | --------------------------------- | ------------------------------------------ |
+| `initialize`             | Identify client                   | `clientInfo { name, version }`             |
+| `newConversation`        | Create a new conversation         | `cwd?`, `model?`, config overrides         |
+| `resumeConversation`     | Resume an existing conversation   | `conversationId`, `path?`                  |
+| `addConversationListener` | Subscribe to events for a thread | `conversationId`, `experimentalRawEvents?` |
+| `sendUserMessage`        | Start a turn with user input      | `conversationId`, `items: [InputItem]`     |
+
+**Notifications (when `experimentalRawEvents=false`):**
+- `codex/event/task_started`
+- `codex/event/agent_reasoning_delta` / `agent_reasoning_section_break`
+- `codex/event/agent_message_delta`
+- `codex/event/agent_message`
+- `codex/event/token_count`
+- `codex/event/task_complete`
+
+**User input shape (current app-server):**
 ```json
-{"jsonrpc":"2.0","id":1,"method":"createThread","params":{"message":"Your prompt","cwd":"/path/to/project"}}
+{
+  "conversationId": "<id>",
+  "items": [
+    { "type": "text", "data": { "text": "hello" } }
+  ]
+}
 ```
 
-Output (stdout):
-- JSON-RPC responses for requests
-- JSONL event notifications (thread.started, item.*, turn.*, etc.)
+#### Planned v2 JSON-RPC Methods (forward looking)
 
-**Multi-turn within single process:**
+| Method            | Description                          | Parameters (camelCase)                                        |
+| ----------------- | ------------------------------------ | ------------------------------------------------------------- |
+| `initialize`      | Identify client                      | `clientInfo { name, version }`                                |
+| `thread/start`    | Create a new thread                  | `model?`, `modelProvider?`, `cwd?`, `approvalPolicy?`, `sandbox?`, `config?`, `baseInstructions?`, `developerInstructions?` |
+| `thread/resume`   | Resume a saved thread                | `threadId`, optional overrides (same shape as `thread/start`) |
+| `turn/start`      | Start a turn on a thread             | `threadId`, `input: [UserInput]`, optional overrides (`cwd`, `approvalPolicy`, `sandboxPolicy`, `model`, `effort`, `summary`) |
+| `turn/interrupt`  | Interrupt current turn               | `threadId`, `turnId`                                          |
+| `thread/list`     | List recorded threads                | `cursor?`, `limit?`, `modelProviders?`                        |
+| `thread/archive`  | Archive a thread                     | `threadId`                                                    |
+| `review/start`    | Start a review                       | `threadId`, `target`, optional `delivery`                     |
+
+**Key v2 Notifications (method field):**
+- `thread/started` (params.thread.id)
+- `turn/started`
+- `turn/completed`
+- `item/started`, `item/completed`
+- `item/agentMessage/delta`, `item/reasoning/textDelta`, etc.
+- `turn/plan/updated`, `turn/diff/updated`
+- Approval requests arrive as JSON-RPC requests:
+  - `item/commandExecution/requestApproval`
+  - `item/fileChange/requestApproval`
+
+**User input shape (v2):**
 ```json
-// Create initial thread
-{"jsonrpc":"2.0","id":1,"method":"createThread","params":{"message":"Analyze auth","cwd":"/project"}}
-// ... events stream ...
-
-// Continue conversation
-{"jsonrpc":"2.0","id":2,"method":"createTurn","params":{"thread_id":"sess_abc123","message":"Now refactor it"}}
+{ "type": "text", "text": "hello" }
+{ "type": "image", "url": "https://..." }
+{ "type": "localImage", "path": "/abs/path.png" }
 ```
 
 **Approval Handling:**
@@ -759,13 +812,30 @@ waits for the client to respond:
 
 ```json
 // Server notification
-{"type":"approval.required","id":"approval_1","turn_id":"turn_1","action_type":"shell","description":"Run: npm test","command":"npm test"}
+{"type":"approval.required","id":"approval_1","turn_id":"turn_1","action_type":"shell","description":"Run: npm test","command":"npm test","tool_name":"bash","tool_input":{"command":"npm test"},"file_path":null}
 
 // Client response
 {"jsonrpc":"2.0","id":3,"method":"respondToApproval","params":{"approval_id":"approval_1","decision":"allow"}}
+
+// Client response with message (for deny)
+{"jsonrpc":"2.0","id":4,"method":"respondToApproval","params":{"approval_id":"approval_2","decision":"deny","message":"Reason for denial"}}
 ```
 
 **Decision values:** `allow`, `deny`, `allow_always`, `deny_always`
+
+**Config Override Syntax (`-c`):**
+
+The `-c` flag accepts key=value pairs to override config settings:
+```bash
+codex app-server -c 'approval_policy="on-failure"' -c 'sandbox_mode="workspace-write"' -c 'model="o3"'
+```
+
+Common config keys:
+| Key | Values | Description |
+| --- | ------ | ----------- |
+| `approval_policy` | `on-request`, `untrusted`, `on-failure`, `never` | When to prompt for approval |
+| `sandbox_mode` | `read-only`, `workspace-write`, `danger-full-access` | File system access level |
+| `model` | Model name string | AI model to use |
 
 ### 4.3 Exec Mode (Legacy)
 
@@ -834,6 +904,7 @@ turn and does not support interactive approvals.
 type CodexEventType =
   // Session lifecycle
   | "thread.started"
+  | "session_meta"      // Session metadata (app-server, stored in session files)
   // Turn lifecycle
   | "turn.started"
   | "turn.completed"
@@ -842,6 +913,10 @@ type CodexEventType =
   | "item.started"
   | "item.updated"
   | "item.completed"
+  // Approval (app-server mode only)
+  | "approval.required"
+  // Message history (stored in session files)
+  | "event_msg"         // User/agent messages in session history
   // Errors
   | "error"
 ```
@@ -852,12 +927,17 @@ type CodexEventType =
 type CodexItemType =
   | "agent_message"      // Model text response (assistant output)
   | "reasoning"          // Internal chain-of-thought reasoning
-  | "command_execution"  // Shell command execution
+  | "command_execution"  // Shell command execution (alias: "shell")
+  | "tool_call"          // Generic tool call (alias for shell/command execution)
+  | "shell"              // Shell command (alias for tool_call/command_execution)
   | "file_change"        // File create/modify/delete
   | "mcp_tool_call"      // MCP tool invocation
   | "web_search"         // Web search query and results
   | "todo_list"          // Task planning list
   | "error"              // Error during item processing
+
+// Note: "tool_call" and "shell" are often used interchangeably in the JSONL
+// output. Clients should treat them as equivalent to "command_execution".
 
 // Item status values
 type CodexItemStatus =
@@ -885,6 +965,69 @@ All item events include a full `item` object with an `id` field for correlation.
   "thread_id": "sess_abc123xyz"
 }
 ```
+
+#### Session Meta (App-Server Mode)
+Session metadata stored in session files, containing session info including
+working directory and git context:
+```json
+{
+  "type": "session_meta",
+  "payload": {
+    "id": "sess_abc123xyz",
+    "cwd": "/path/to/project",
+    "timestamp": "2025-01-15T10:30:00Z",
+    "model_provider": "openai",
+    "git": {
+      "branch": "main",
+      "remote_url": "https://github.com/user/repo.git"
+    }
+  }
+}
+```
+
+#### Approval Required (App-Server Mode)
+Emitted when interactive approval is needed for a tool execution:
+```json
+{
+  "type": "approval.required",
+  "id": "approval_001",
+  "turn_id": "turn_001",
+  "action_type": "shell",
+  "description": "Run: npm test",
+  "tool_name": "bash",
+  "tool_input": {
+    "command": "npm test"
+  },
+  "command": "npm test",
+  "file_path": null
+}
+```
+
+**action_type values:** `shell`, `file_write`, `file_read`, `mcp_tool`
+
+#### Event Message (Session History)
+User and agent messages stored in session history files:
+```json
+{
+  "type": "event_msg",
+  "payload": {
+    "type": "user_message",
+    "message": "Analyze the authentication module"
+  }
+}
+```
+
+```json
+{
+  "type": "event_msg",
+  "payload": {
+    "type": "agent_message",
+    "message": "I'll analyze the authentication module for you."
+  }
+}
+```
+
+**payload.type values:** `user_message`, `agent_message`
 
 #### Turn Started
 ```json

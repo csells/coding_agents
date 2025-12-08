@@ -147,6 +147,8 @@ class _CodexCodingAgentSession implements CodingAgentSession {
   int _turnCounter = 0;
   bool _turnInProgress = false;
   CodexSession? _currentUnderlyingSession;
+  bool _sawPartialThisTurn = false;
+  final Set<int> _agentMessageSeenTurns = {};
 
   _CodexCodingAgentSession({
     required CodexCliAdapter adapter,
@@ -172,6 +174,7 @@ class _CodexCodingAgentSession implements CodingAgentSession {
 
     _turnInProgress = true;
     final turnId = _turnCounter++;
+    _sawPartialThisTurn = false;
 
     CodexSession underlyingSession;
 
@@ -246,13 +249,20 @@ class _CodexCodingAgentSession implements CodingAgentSession {
         break;
 
       case CodexAgentMessageEvent():
+        if (event.isPartial) {
+          _sawPartialThisTurn = true;
+        } else if (_sawPartialThisTurn) {
+          // Final full message after streaming deltas; already printed.
+          break;
+        }
+        _agentMessageSeenTurns.add(turnId);
         _eventController.add(
           CodingAgentTextEvent(
             sessionId: sid,
             turnId: turnId,
             timestamp: event.timestamp,
             text: event.message,
-            isPartial: false,
+            isPartial: event.isPartial,
           ),
         );
 
@@ -283,6 +293,8 @@ class _CodexCodingAgentSession implements CodingAgentSession {
         );
 
       case CodexTurnCompletedEvent():
+        _sawPartialThisTurn = false;
+        _agentMessageSeenTurns.remove(turnId);
         CodingAgentUsage? usage;
         if (event.usage != null) {
           usage = CodingAgentUsage(
@@ -303,6 +315,8 @@ class _CodexCodingAgentSession implements CodingAgentSession {
         );
 
       case CodexTurnFailedEvent():
+        _sawPartialThisTurn = false;
+        _agentMessageSeenTurns.remove(turnId);
         _eventController.add(
           CodingAgentTurnEndEvent(
             sessionId: sid,
@@ -365,6 +379,10 @@ class _CodexCodingAgentSession implements CodingAgentSession {
   }) {
     switch (item) {
       case CodexAgentMessageItem():
+        if (_agentMessageSeenTurns.contains(turnId)) {
+          // Avoid duplicate text when both agent_message and agent_message_item arrive.
+          return;
+        }
         _eventController.add(
           CodingAgentTextEvent(
             sessionId: sessionId,
@@ -566,7 +584,7 @@ class _CodexCodingAgentSession implements CodingAgentSession {
             turnId: turnId,
             timestamp: event.timestamp,
             text: event.message,
-            isPartial: false,
+            isPartial: event.isPartial,
           ),
         );
 

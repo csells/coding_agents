@@ -200,8 +200,16 @@ Future<void> _oneShot(
           projectDirectory: projectDir,
         );
 
+  var sawPartial = false;
   await for (final event in session.events) {
     switch (event) {
+      case CodexAgentMessageEvent():
+        if (event.isPartial) {
+          sawPartial = true;
+          stdout.write(event.message);
+        } else if (!sawPartial) {
+          stdout.write(event.message);
+        }
       case CodexItemCompletedEvent():
         final item = event.item;
         if (item is CodexAgentMessageItem) {
@@ -214,10 +222,12 @@ Future<void> _oneShot(
         print('\n[Approval request: ${event.request.description}]');
       case CodexTurnCompletedEvent():
         print('');
-        break;
+        await session.cancel();
+        return;
       case CodexErrorEvent():
         print('Error: ${event.message}');
-        break;
+        await session.cancel();
+        return;
       default:
         break;
     }
@@ -321,8 +331,16 @@ Future<void> _repl(
     }
 
     stdout.write('Codex: ');
+    var sawPartial = false;
     await for (final event in activeSession.events) {
       switch (event) {
+        case CodexAgentMessageEvent():
+          if (event.isPartial) {
+            sawPartial = true;
+            stdout.write(event.message);
+          } else if (!sawPartial) {
+            stdout.write(event.message);
+          }
         case CodexItemCompletedEvent():
           final item = event.item;
           if (item is CodexAgentMessageItem) {

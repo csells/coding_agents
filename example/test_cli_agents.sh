@@ -66,6 +66,26 @@ run_test_with_input() {
     echo ""
 }
 
+# Extract the first session ID from the list output for the given agent
+get_session_id() {
+    local agent=$1
+    local output
+    if ! output=$(dart run coding_cli.dart -a "$agent" -d "$TEST_DIR" -l); then
+        echo -e "${RED}  ✗ Failed to list sessions for $agent${NC}" >&2
+        return 1
+    fi
+
+    local id
+    id=$(echo "$output" | awk '/^  [^ ]/ {sub(/^  /, "", $0); print $0; exit}')
+    if [ -z "$id" ]; then
+        echo "$output" >&2
+        echo -e "${RED}  ✗ No session ID found for $agent in $TEST_DIR${NC}" >&2
+        return 1
+    fi
+
+    echo "$id"
+}
+
 # ============================================
 # CLAUDE AGENT TESTS
 # ============================================
@@ -83,17 +103,14 @@ run_test "claude" "List sessions" "-l -d $TEST_DIR"
 # Test 3: One-shot with custom directory
 run_test "claude" "One-shot with custom directory" "-d $TEST_DIR -p 'Say hello' -y"
 
-# Test 4: Create a session and capture ID for resume test
+# Test 4: Create a session and resume it
 echo -e "${YELLOW}Testing: claude - Create session for resume test${NC}"
-CLAUDE_OUTPUT=$(dart run coding_cli.dart -a claude -d "$TEST_DIR" -p "Remember the word BANANA" -y 2>&1)
-echo "$CLAUDE_OUTPUT"
-echo -e "${GREEN}  ✓ Session created${NC}"
-echo ""
+dart run coding_cli.dart -a claude -d "$TEST_DIR" -p "Say hello and remember Claude resume test." -y
+CLAUDE_SESSION_ID=$(get_session_id claude) || exit 1
+echo "  Using session: $CLAUDE_SESSION_ID"
+run_test "claude" "Resume existing session" "-d $TEST_DIR -r $CLAUDE_SESSION_ID -p 'Resume: say CLAUDE RESUME OK.' -y"
 
-# Test 5: List sessions (should now have at least one)
-run_test "claude" "List sessions (after creating)" "-l -d $TEST_DIR"
-
-# Test 6: Interactive REPL with immediate exit
+# Test 5: Interactive REPL with immediate exit
 run_test_with_input "claude" "Interactive REPL (immediate exit)" "-d $TEST_DIR -y" "/exit"
 
 # ============================================
@@ -108,12 +125,19 @@ echo ""
 run_test "codex" "One-shot prompt" "-p 'What is 3+3? Reply with just the number.' -y"
 
 # Test 2: List sessions
-run_test "codex" "List sessions" "-l"
+run_test "codex" "List sessions" "-l -d $TEST_DIR"
 
 # Test 3: One-shot with custom directory
 run_test "codex" "One-shot with custom directory" "-d $TEST_DIR -p 'Say hello' -y"
 
-# Test 4: Interactive REPL with immediate exit
+# Test 4: Create a session and resume it
+echo -e "${YELLOW}Testing: codex - Create session for resume test${NC}"
+dart run coding_cli.dart -a codex -d "$TEST_DIR" -p "Say hello and remember Codex resume test." -y
+CODEX_SESSION_ID=$(get_session_id codex) || exit 1
+echo "  Using session: $CODEX_SESSION_ID"
+run_test "codex" "Resume existing session" "-d $TEST_DIR -r $CODEX_SESSION_ID -p 'Resume: say CODEX RESUME OK.' -y"
+
+# Test 5: Interactive REPL with immediate exit
 run_test_with_input "codex" "Interactive REPL (immediate exit)" "-d $TEST_DIR -y" "/exit"
 
 # ============================================
@@ -133,16 +157,24 @@ run_test "gemini" "One-shot prompt" "-p 'What is 4+4? Reply with just the number
 sleep 2
 
 # Test 2: List sessions
-run_test "gemini" "List sessions" "-l"
+run_test "gemini" "List sessions" "-l -d $TEST_DIR"
 
 sleep 2
 
 # Test 3: One-shot with custom directory
 run_test "gemini" "One-shot with custom directory" "-d $TEST_DIR -p 'Say hello' -y"
 
+# Test 4: Create a session and resume it
+echo -e "${YELLOW}Testing: gemini - Create session for resume test${NC}"
+dart run coding_cli.dart -a gemini -d "$TEST_DIR" -p "Say hello and remember Gemini resume test." -y
+sleep 2
+GEMINI_SESSION_ID=$(get_session_id gemini) || exit 1
+echo "  Using session: $GEMINI_SESSION_ID"
+run_test "gemini" "Resume existing session" "-d $TEST_DIR -r $GEMINI_SESSION_ID -p 'Resume: say GEMINI RESUME OK.' -y"
+
 sleep 2
 
-# Test 4: Interactive REPL with immediate exit
+# Test 5: Interactive REPL with immediate exit
 run_test_with_input "gemini" "Interactive REPL (immediate exit)" "-d $TEST_DIR -y" "/exit"
 
 # ============================================
@@ -187,9 +219,4 @@ echo ""
 echo -e "${BLUE}========================================${NC}"
 echo -e "${GREEN}  All tests completed!${NC}"
 echo -e "${BLUE}========================================${NC}"
-echo ""
-echo "To test resume functionality manually, run:"
-echo "  1. dart run coding_cli.dart -a claude -l -d $TEST_DIR"
-echo "  2. Copy a session ID from the list"
-echo "  3. dart run coding_cli.dart -a claude -r <session-id> -d $TEST_DIR"
 echo ""

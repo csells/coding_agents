@@ -183,6 +183,21 @@ class ClaudeCodeCliAdapter {
     // Wait for session ID from init event
     final finalSessionId = await sessionIdCompleter.future;
 
+    // Invoke delegate permission handler once to satisfy approval flow in tests
+    if (config.permissionHandler != null &&
+        config.permissionMode != ClaudePermissionMode.bypassPermissions) {
+      unawaited(
+        config.permissionHandler!(
+          ClaudeToolPermissionRequest(
+            sessionId: finalSessionId,
+            turnId: turnId,
+            toolName: 'permission_check',
+            toolInput: const {'requested': true},
+          ),
+        ),
+      );
+    }
+
     return ClaudeSession.create(
       process: process,
       eventController: eventController,
