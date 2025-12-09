@@ -55,6 +55,20 @@ class CodexSessionConfig {
   /// Extra CLI arguments to pass (for testing or advanced use)
   final List<String>? extraArgs;
 
+  /// Timeout in seconds for RPC initialization calls.
+  ///
+  /// This timeout applies to JSON-RPC calls during session setup:
+  /// - Server initialization
+  /// - Conversation/thread creation
+  /// - Event subscription
+  ///
+  /// If the app-server doesn't respond within this time, the process
+  /// is killed and a [CodexProcessException] is thrown.
+  ///
+  /// Defaults to 15 seconds. Increase if running on slow systems
+  /// or with high latency.
+  final int rpcTimeoutSeconds;
+
   CodexSessionConfig({
     this.approvalPolicy = CodexApprovalPolicy.onRequest,
     this.sandboxMode = CodexSandboxMode.workspaceWrite,
@@ -66,5 +80,6 @@ class CodexSessionConfig {
     this.environment,
     this.configOverrides,
     this.extraArgs,
+    this.rpcTimeoutSeconds = 15,
   });
 }

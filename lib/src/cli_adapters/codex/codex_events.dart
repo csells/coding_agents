@@ -194,11 +194,17 @@ sealed class CodexEvent {
         );
 
       case 'approval.required':
+        final approvalId = json['id'] as String?;
+        if (approvalId == null || approvalId.isEmpty) {
+          throw FormatException(
+            'Missing required field "id" in approval.required event',
+          );
+        }
         return CodexApprovalRequiredEvent(
           threadId: threadId,
           turnId: turnId,
           request: CodexApprovalRequest(
-            id: json['id'] as String? ?? '',
+            id: approvalId,
             turnId: json['turn_id'] as String? ?? '',
             actionType: json['action_type'] as String? ?? 'unknown',
             description: json['description'] as String? ?? '',

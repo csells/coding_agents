@@ -392,6 +392,8 @@ Session
 
 - [CLI Streaming Protocol](specs/cli-streaming-protocol.md) - JSONL streaming
   protocols
+- [Best Practices](specs/best-practices.md) - Architectural and coding best
+  practices
 
 ## Development
 

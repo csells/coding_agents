@@ -34,7 +34,7 @@ dart run build_runner build
 
 ## Architecture
 
-### Design Principles (from specs/cli-adapter-design.md)
+### Design Principles
 - **CLI-specific types**: Each adapter (Claude, Codex, Gemini) has its own event
   types, config types, and session types with no shared abstractions
 - **Idiomatic Dart**: Use `Stream<T>` for events, `Future<T>` for async
@@ -50,10 +50,17 @@ dart run build_runner build
 ```
 lib/
 └── src/
-    └── cli_adapters/
-        ├── claude_code/  # Claude Code adapter (long-lived bidirectional JSONL)
-        ├── codex/        # Codex CLI adapter (process-per-turn)
-        └── gemini/       # Gemini CLI adapter (process-per-turn)
+    ├── coding_agent/     # Unified CodingAgent abstraction layer
+    │   ├── coding_agent.dart           # Abstract interfaces
+    │   ├── coding_agent_events.dart    # Unified event types
+    │   ├── coding_agent_types.dart     # Shared types (ToolApprovalHandler, etc.)
+    │   ├── claude_coding_agent.dart    # Claude implementation
+    │   ├── codex_coding_agent.dart     # Codex implementation
+    │   └── gemini_coding_agent.dart    # Gemini implementation
+    └── cli_adapters/     # Low-level CLI adapters
+        ├── claude_code/  # Long-lived bidirectional JSONL
+        ├── codex/        # App-server v2 JSON-RPC (process-per-turn)
+        └── gemini/       # Process-per-turn with sandbox mode
 ```
 
 ### Multi-Turn Architecture Patterns
@@ -64,12 +71,28 @@ lib/
 - **Gemini CLI**: Process-per-turn - spawn new process with `--resume
   <session_id>`
 
-### Common Adapter Pattern
+### Unified CodingAgent Pattern (Recommended)
+```dart
+CodingAgent
+  ├── createSession(projectDirectory, approvalHandler?) → CodingAgentSession
+  ├── resumeSession(sessionId, projectDirectory, approvalHandler?) → CodingAgentSession
+  └── listSessions(projectDirectory) → List<CodingAgentSessionInfo>
+
+CodingAgentSession
+  ├── sessionId: String
+  ├── events: Stream<CodingAgentEvent>  # Continuous across all turns
+  ├── sendMessage(prompt) → CodingAgentTurn
+  ├── getHistory() → List<CodingAgentEvent>
+  └── close() → void
+```
+
+### Low-Level Adapter Pattern
 ```dart
 Client (per CWD)
   ├── createSession(prompt, config) → Session
   ├── resumeSession(sessionId, prompt, config) → Session
-  └── listSessions() → List<SessionInfo>  // Claude only
+  ├── listSessions() → List<SessionInfo>
+  └── getSessionHistory(sessionId) → List<Event>
 
 Session
   ├── sessionId: String (threadId for Codex)
@@ -101,18 +124,10 @@ From [specs/best-practices.md](specs/best-practices.md):
 
 ## Key Specifications
 
-- [specs/cli-adapter-design.md](specs/cli-adapter-design.md): Detailed API
-  design for each adapter
 - [specs/cli-streaming-protocol.md](specs/cli-streaming-protocol.md): JSONL
   streaming protocols for all three CLIs
 - [specs/best-practices.md](specs/best-practices.md): Architectural and coding
   best practices
-
-## Dependencies
-
-- `json_annotation` / `json_serializable`: JSON serialization for event and config types
-- `path`: Path manipulation utilities
-- Planned: `mcp_dart` for MCP server implementation (Claude permission delegation)
 
 ## Coding Agent Protocol
 

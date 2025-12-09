@@ -43,10 +43,22 @@ sealed class GeminiEvent {
         );
 
       case 'tool_use':
+        final toolId = json['tool_id'] as String?;
+        if (toolId == null || toolId.isEmpty) {
+          throw FormatException(
+            'Missing required field "tool_id" in tool_use event',
+          );
+        }
+        final toolName = json['tool_name'] as String?;
+        if (toolName == null || toolName.isEmpty) {
+          throw FormatException(
+            'Missing required field "tool_name" in tool_use event',
+          );
+        }
         final params = json['parameters'];
         final toolUse = GeminiToolUse(
-          toolName: json['tool_name'] as String? ?? '',
-          toolId: json['tool_id'] as String? ?? '',
+          toolName: toolName,
+          toolId: toolId,
           parameters: params != null
               ? Map<String, dynamic>.from(params as Map)
               : <String, dynamic>{},
@@ -58,10 +70,16 @@ sealed class GeminiEvent {
         );
 
       case 'tool_result':
+        final toolId = json['tool_id'] as String?;
+        if (toolId == null || toolId.isEmpty) {
+          throw FormatException(
+            'Missing required field "tool_id" in tool_result event',
+          );
+        }
         final errorData = json['error'];
         final toolResult = GeminiToolResult(
-          toolId: json['tool_id'] as String? ?? '',
-          status: json['status'] as String? ?? '',
+          toolId: toolId,
+          status: json['status'] as String? ?? 'unknown',
           output: json['output'] as String?,
           error: errorData != null
               ? Map<String, dynamic>.from(errorData as Map)

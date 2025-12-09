@@ -104,11 +104,9 @@ void main() {
       );
 
       final toolItems = <CodexToolCallItem>[];
-      final allItems = <CodexItem>[];
 
       await for (final event in session.events) {
         if (event is CodexItemCompletedEvent) {
-          allItems.add(event.item);
           final item = event.item;
           if (item is CodexToolCallItem) {
             toolItems.add(item);
@@ -117,11 +115,19 @@ void main() {
         if (event is CodexTurnCompletedEvent) break;
       }
 
-      // Should have at least received some items
       expect(
-        allItems,
+        toolItems,
         isNotEmpty,
-        reason: 'Should have received some items from Codex',
+        reason: 'Should have received a real tool_call item from Codex',
+      );
+      expect(
+        toolItems.any(
+          (t) =>
+              t.output?.toLowerCase().contains('test output') == true &&
+              t.exitCode == 0,
+        ),
+        isTrue,
+        reason: 'Tool_call item should include the shell output and a success exit code',
       );
     });
 

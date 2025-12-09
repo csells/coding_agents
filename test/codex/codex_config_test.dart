@@ -88,6 +88,18 @@ void main() {
       expect(config.environment!['DEBUG'], 'true');
     });
 
+    test('constructs with default rpcTimeoutSeconds', () {
+      final config = CodexSessionConfig();
+
+      expect(config.rpcTimeoutSeconds, 15);
+    });
+
+    test('constructs with custom rpcTimeoutSeconds', () {
+      final config = CodexSessionConfig(rpcTimeoutSeconds: 30);
+
+      expect(config.rpcTimeoutSeconds, 30);
+    });
+
     test('constructs with all options', () {
       final config = CodexSessionConfig(
         approvalPolicy: CodexApprovalPolicy.untrusted,
@@ -97,6 +109,7 @@ void main() {
         model: 'o3-mini',
         enableWebSearch: true,
         environment: {'KEY': 'value'},
+        rpcTimeoutSeconds: 60,
       );
 
       expect(config.approvalPolicy, CodexApprovalPolicy.untrusted);
@@ -106,6 +119,7 @@ void main() {
       expect(config.model, 'o3-mini');
       expect(config.enableWebSearch, isTrue);
       expect(config.environment, {'KEY': 'value'});
+      expect(config.rpcTimeoutSeconds, 60);
     });
   });
 }

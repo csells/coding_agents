@@ -2,19 +2,18 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../shared_utils.dart';
 import 'claude_config.dart';
 import 'claude_events.dart';
 import 'claude_session.dart';
 import 'claude_types.dart';
 
 /// Exception thrown when Claude process encounters an error
-class ClaudeProcessException implements Exception {
-  final String message;
-
-  ClaudeProcessException(this.message);
+class ClaudeProcessException extends CliProcessException {
+  ClaudeProcessException(super.message);
 
   @override
-  String toString() => 'ClaudeProcessException: $message';
+  String get adapterName => 'ClaudeProcessException';
 }
 
 /// Client for interacting with Claude Code CLI

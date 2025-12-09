@@ -2,19 +2,18 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../shared_utils.dart';
 import 'codex_config.dart';
 import 'codex_events.dart';
 import 'codex_session.dart';
 import 'codex_types.dart';
 
 /// Exception thrown when Codex process encounters an error
-class CodexProcessException implements Exception {
-  final String message;
-
-  CodexProcessException(this.message);
+class CodexProcessException extends CliProcessException {
+  CodexProcessException(super.message);
 
   @override
-  String toString() => 'CodexProcessException: $message';
+  String get adapterName => 'CodexProcessException';
 }
 
 /// Client for interacting with Codex CLI via the app-server
@@ -25,8 +24,9 @@ class CodexProcessException implements Exception {
 /// - Interactive approval handling via callbacks
 /// - Bidirectional streaming
 class CodexCliAdapter {
-  final Map<String, String> _promptMemory = {};
   final Map<String, List<CodexEvent>> _historyCache = {};
+  final Map<String, DateTime> _historyCacheModified = {};
+  static const int _historyCacheLimit = 32;
 
   CodexCliAdapter();
 
@@ -71,61 +71,19 @@ class CodexCliAdapter {
     String threadId, {
     required String projectDirectory,
   }) async {
-    if (_historyCache.containsKey(threadId)) {
-      return List<CodexEvent>.from(_historyCache[threadId]!);
-    }
-
-    final sessionsDir = Directory(
-      '${Platform.environment['HOME']}/.codex/sessions',
+    final sessionLocation = await _locateSessionFile(
+      threadId,
+      projectDirectory: projectDirectory,
     );
-
-    if (!await sessionsDir.exists()) {
+    if (sessionLocation == null) {
       throw CodexProcessException('Session not found: $threadId');
     }
-
-    // Find the session file containing this threadId
-    File? sessionFile;
-    await for (final entity in sessionsDir.list(recursive: true)) {
-      if (entity is! File || !entity.path.endsWith('.jsonl')) continue;
-
-      // Check if this file contains our threadId
-      final firstLines = await entity
-          .openRead()
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .take(10)
-          .toList();
-
-      for (final line in firstLines) {
-        if (!line.trim().startsWith('{')) continue;
-        final json = jsonDecode(line) as Map<String, dynamic>;
-
-        // Check session_meta event
-        if (json['type'] == 'session_meta') {
-          final payload = json['payload'] as Map<String, dynamic>?;
-          if (payload?['id'] == threadId) {
-            // Verify session belongs to this projectDirectory
-            final sessionCwd = payload?['cwd'] as String?;
-            if (sessionCwd != projectDirectory) {
-              throw CodexProcessException('Session not found: $threadId');
-            }
-            sessionFile = entity;
-            break;
-          }
-        }
-
-        // Check thread.started event
-        if (json['type'] == 'thread.started' && json['thread_id'] == threadId) {
-          sessionFile = entity;
-          break;
-        }
-      }
-
-      if (sessionFile != null) break;
-    }
-
-    if (sessionFile == null) {
-      throw CodexProcessException('Session not found: $threadId');
+    final sessionFile = sessionLocation.file;
+    final stat = await sessionFile.stat();
+    final cachedMtime = _historyCacheModified[threadId];
+    final cachedEvents = _historyCache[threadId];
+    if (cachedEvents != null && cachedMtime == stat.modified) {
+      return List<CodexEvent>.from(cachedEvents);
     }
 
     final events = <CodexEvent>[];
@@ -152,52 +110,23 @@ class CodexCliAdapter {
     }
 
     _historyCache[threadId] = events;
+    _historyCacheModified[threadId] = stat.modified;
+    _trimHistoryCache();
     return events;
   }
 
   /// Find the session file path for a given threadId
   ///
   /// Returns the path to the JSONL file containing the session, or null if not found.
-  Future<String?> _findSessionFilePath(String threadId) async {
-    final sessionsDir = Directory(
-      '${Platform.environment['HOME']}/.codex/sessions',
+  Future<String?> _findSessionFilePath(
+    String threadId, {
+    String? projectDirectory,
+  }) async {
+    final location = await _locateSessionFile(
+      threadId,
+      projectDirectory: projectDirectory,
     );
-
-    if (!await sessionsDir.exists()) {
-      return null;
-    }
-
-    await for (final entity in sessionsDir.list(recursive: true)) {
-      if (entity is! File || !entity.path.endsWith('.jsonl')) continue;
-
-      // Check if this file contains our threadId
-      final firstLines = await entity
-          .openRead()
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .take(10)
-          .toList();
-
-      for (final line in firstLines) {
-        if (!line.trim().startsWith('{')) continue;
-        final json = jsonDecode(line) as Map<String, dynamic>;
-
-        // Check session_meta event
-        if (json['type'] == 'session_meta') {
-          final payload = json['payload'] as Map<String, dynamic>?;
-          if (payload?['id'] == threadId) {
-            return entity.path;
-          }
-        }
-
-        // Check thread.started event
-        if (json['type'] == 'thread.started' && json['thread_id'] == threadId) {
-          return entity.path;
-        }
-      }
-    }
-
-    return null;
+    return location?.file.path;
   }
 
   Future<CodexSessionInfo?> _parseSessionFile(File file) async {
@@ -294,15 +223,13 @@ class CodexCliAdapter {
     final eventController = StreamController<CodexEvent>();
     final stderrBuffer = StringBuffer();
     String? lastErrorMessage;
-    CodexUsage? latestUsage;
-    var hasEmittedToolItem = false;
-    var emittedThreadStarted = false;
 
     final threadIdCompleter = Completer<String>();
     final preSessionPending = <String, Completer<Map<String, dynamic>>>{};
     String threadId = '';
     CodexSession? session;
     var rpcId = 0;
+    var emittedThreadStarted = false;
 
     // Capture stderr for error reporting
     process.stderr.transform(utf8.decoder).listen((data) {
@@ -310,148 +237,43 @@ class CodexCliAdapter {
     });
 
     // Parse stdout JSONL (JSON-RPC messages and notifications)
-    process.stdout
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((line) {
-          final parsed = _parseJsonLine(line, threadId);
-          if (parsed == null) return;
-
-          // Handle RPC responses (may omit jsonrpc field)
-          if (parsed.containsKey('id')) {
-            final respKey = parsed['id']?.toString();
-            if (respKey != null && preSessionPending.containsKey(respKey)) {
-              preSessionPending.remove(respKey)!.complete(parsed);
-              return;
-            }
-            // Capture thread id from thread/start response
-            final result = parsed['result'];
-            if (result is Map && result['thread'] is Map) {
-              final tid = result['thread']['id'] as String?;
-              if (tid != null) {
-                threadId = tid;
-                if (!threadIdCompleter.isCompleted) {
-                  threadIdCompleter.complete(tid);
-                }
-              }
-            }
-            session?.handleRpcResponse(parsed);
-            return;
-          }
-
-          // Convert to event
-          var event = CodexEvent.fromJson(
-            parsed,
-            threadId,
-            session?.currentTurnId ?? 0,
-          );
-
-          // Capture thread ID from thread.started event
-          if (event is CodexThreadStartedEvent) {
-            threadId = event.threadId;
+    _listenToProcessStdout(
+      process: process,
+      eventController: eventController,
+      preSessionPending: preSessionPending,
+      currentTurnId: () => session?.currentTurnId ?? 0,
+      currentThreadId: () => threadId,
+      onThreadId: (tid) {
+        threadId = tid;
+        if (!threadIdCompleter.isCompleted) {
+          threadIdCompleter.complete(tid);
+        }
+      },
+      handleRpcResponse: (parsed) {
+        // Capture thread id from thread/start response
+        final result = parsed['result'];
+        if (result is Map && result['thread'] is Map) {
+          final tid = result['thread']['id'] as String?;
+          if (tid != null) {
+            threadId = tid;
             if (!threadIdCompleter.isCompleted) {
-              threadIdCompleter.complete(event.threadId);
+              threadIdCompleter.complete(tid);
             }
           }
-
-          // Capture token usage from token_count events
-          if (parsed['method'] == 'codex/event/token_count') {
-            final msg =
-                (parsed['params'] as Map<String, dynamic>?)?['msg']
-                    as Map<String, dynamic>?;
-            final info = msg?['info'] as Map<String, dynamic>?;
-            final total = info?['total_token_usage'] as Map<String, dynamic>?;
-            if (total != null) {
-              latestUsage = CodexUsage(
-                inputTokens: (total['input_tokens'] as num?)?.toInt() ?? 0,
-                outputTokens: (total['output_tokens'] as num?)?.toInt() ?? 0,
-                cachedInputTokens:
-                    (total['cached_input_tokens'] as num?)?.toInt() ?? 0,
-              );
-            }
-          }
-
-          if (event is CodexAgentMessageEvent &&
-              event.message.isNotEmpty &&
-              !event.isPartial) {
-            final itemEvent = CodexItemCompletedEvent(
-              threadId: event.threadId,
-              turnId: event.turnId,
-              item: CodexAgentMessageItem(
-                id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-                text: event.message,
-              ),
-              status: 'completed',
-            );
-            Future.microtask(() {
-              _enqueueEvent(
-                itemEvent,
-                eventController,
-              );
-            });
-          }
-
-          if (!emittedThreadStarted && threadId.isNotEmpty) {
-            emittedThreadStarted = true;
-            final synthetic = CodexThreadStartedEvent(
-              threadId: threadId,
-              turnId: session?.currentTurnId ?? 0,
-            );
-            _enqueueEvent(
-              synthetic,
-              eventController,
-            );
-          }
-
-          if (event is CodexTurnCompletedEvent &&
-              event.usage == null &&
-              latestUsage != null) {
-            event = CodexTurnCompletedEvent(
-              threadId: event.threadId,
-              turnId: event.turnId,
-              usage: latestUsage,
-            );
-          }
-
-          if (event is CodexTurnCompletedEvent && !hasEmittedToolItem) {
-            final toolItem = CodexToolCallItem(
-              id: 'tool_${DateTime.now().millisecondsSinceEpoch}',
-              name: 'shell',
-              arguments: const {},
-              output: 'Completed',
-              exitCode: 0,
-            );
-            final toolEvent = CodexItemCompletedEvent(
-              threadId: event.threadId,
-              turnId: event.turnId,
-              item: toolItem,
-              status: 'completed',
-            );
-            _enqueueEvent(
-              toolEvent,
-              eventController,
-            );
-            hasEmittedToolItem = true;
-          }
-
-          if (event is CodexItemCompletedEvent &&
-              event.item is CodexToolCallItem) {
-            hasEmittedToolItem = true;
-          }
-
-          // Handle approval requests via callback
-          if (event is CodexApprovalRequiredEvent) {
-            session?.handleApprovalRequest(event.request);
-          }
-
-          // Capture error messages from error events
-          if (event is CodexErrorEvent) {
-            lastErrorMessage = event.message;
-          }
-
-          // Buffer events until first subscription, then emit directly
-          _enqueueEvent(event, eventController);
-        });
+        }
+        session?.handleRpcResponse(parsed);
+      },
+      handleApprovalRequest: (request) {
+        session?.handleApprovalRequest(request);
+      },
+      handleErrorMessage: (message) {
+        lastErrorMessage = message;
+      },
+      hasEmittedThreadStarted: () => emittedThreadStarted,
+      markThreadStarted: () {
+        emittedThreadStarted = true;
+      },
+    );
 
     // Handle process exit
     process.exitCode.then((code) async {
@@ -493,7 +315,9 @@ class CodexCliAdapter {
         },
       }),
     );
-    await initFuture.future.timeout(const Duration(seconds: 10));
+    await initFuture.future.timeout(
+      Duration(seconds: config.rpcTimeoutSeconds),
+    );
 
     // Start conversation (v1)
     rpcId++;
@@ -508,7 +332,7 @@ class CodexCliAdapter {
       }),
     );
     final newConvResp = await newConvFuture.future.timeout(
-      const Duration(seconds: 15),
+      Duration(seconds: config.rpcTimeoutSeconds),
     );
     final convId =
         (newConvResp['result'] as Map?)?['conversationId'] as String?;
@@ -523,7 +347,7 @@ class CodexCliAdapter {
     final finalThreadId =
         convId ??
         await threadIdCompleter.future.timeout(
-          const Duration(seconds: 15),
+          Duration(seconds: config.rpcTimeoutSeconds),
           onTimeout: () {
             process.kill(ProcessSignal.sigterm);
             final stderr = stderrBuffer.toString().trim();
@@ -531,7 +355,7 @@ class CodexCliAdapter {
                 lastErrorMessage ??
                 (stderr.isNotEmpty
                     ? stderr
-                    : 'Timed out waiting for Codex thread ID');
+                    : 'Timed out waiting for Codex thread ID (${config.rpcTimeoutSeconds}s)');
             throw CodexProcessException(message);
           },
         );
@@ -551,7 +375,9 @@ class CodexCliAdapter {
         },
       }),
     );
-    await subFuture.future.timeout(const Duration(seconds: 10));
+    await subFuture.future.timeout(
+      Duration(seconds: config.rpcTimeoutSeconds),
+    );
 
     final pendingError = config.model != null &&
             config.model!.contains('invalid-model')
@@ -565,9 +391,6 @@ class CodexCliAdapter {
       eventController: eventController,
       threadIdFuture: Future.value(finalThreadId),
       approvalHandler: config.approvalHandler,
-      onSendPrompt: (prompt, thread) {
-        _promptMemory[thread] = prompt;
-      },
       pendingError: pendingError,
     );
 
@@ -590,9 +413,14 @@ class CodexCliAdapter {
     required String projectDirectory,
   }) async {
     // Find the session file path - needed for app-server to load conversation from disk
-    final sessionFilePath = await _findSessionFilePath(threadId);
+    final sessionFilePath = await _findSessionFilePath(
+      threadId,
+      projectDirectory: projectDirectory,
+    );
     if (sessionFilePath == null) {
-      throw CodexProcessException('Session not found: $threadId');
+      throw CodexProcessException(
+        'Session $threadId not found for project $projectDirectory',
+      );
     }
 
     final args = buildAppServerArgs(config);
@@ -607,10 +435,8 @@ class CodexCliAdapter {
     final eventController = StreamController<CodexEvent>();
     final stderrBuffer = StringBuffer();
     String? lastErrorMessage;
-    CodexUsage? latestUsage;
-    var hasEmittedToolItem = false;
     var emittedThreadStarted = false;
-    var emittedNameMessage = false;
+    var activeThreadId = threadId;
 
     CodexSession? session;
     var rpcId = 0;
@@ -621,155 +447,29 @@ class CodexCliAdapter {
       stderrBuffer.write(data);
     });
 
-    // Parse stdout JSONL
-    process.stdout
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((line) {
-          final parsed = _parseJsonLine(line, threadId);
-          if (parsed == null) return;
-
-          // Handle RPC responses (may omit jsonrpc field)
-          if (parsed.containsKey('id')) {
-            final respKey = parsed['id']?.toString();
-            if (respKey != null && preSessionPending.containsKey(respKey)) {
-              preSessionPending.remove(respKey)!.complete(parsed);
-              return;
-            }
-            session?.handleRpcResponse(parsed);
-            return;
-          }
-
-          // Convert to event
-          var event = CodexEvent.fromJson(
-            parsed,
-            threadId,
-            session?.currentTurnId ?? 0,
-          );
-
-          if (parsed['method'] == 'codex/event/token_count') {
-            final msg =
-                (parsed['params'] as Map<String, dynamic>?)?['msg']
-                    as Map<String, dynamic>?;
-            final info = msg?['info'] as Map<String, dynamic>?;
-            final total = info?['total_token_usage'] as Map<String, dynamic>?;
-            if (total != null) {
-              latestUsage = CodexUsage(
-                inputTokens: (total['input_tokens'] as num?)?.toInt() ?? 0,
-                outputTokens: (total['output_tokens'] as num?)?.toInt() ?? 0,
-                cachedInputTokens:
-                    (total['cached_input_tokens'] as num?)?.toInt() ?? 0,
-              );
-            }
-          }
-
-          if (event is CodexAgentMessageEvent &&
-              event.message.isNotEmpty &&
-              !event.isPartial) {
-            final itemEvent = CodexItemCompletedEvent(
-              threadId: event.threadId,
-              turnId: event.turnId,
-              item: CodexAgentMessageItem(
-                id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-                text: event.message,
-              ),
-              status: 'completed',
-            );
-            emittedNameMessage = true;
-            Future.microtask(() {
-              _enqueueEvent(
-                itemEvent,
-                eventController,
-              );
-            });
-          }
-
-          if (!emittedThreadStarted && threadId.isNotEmpty) {
-            emittedThreadStarted = true;
-            final synthetic = CodexThreadStartedEvent(
-              threadId: threadId,
-              turnId: session?.currentTurnId ?? 0,
-            );
-            _enqueueEvent(
-              synthetic,
-              eventController,
-            );
-          }
-
-          if (event is CodexTurnCompletedEvent &&
-              event.usage == null &&
-              latestUsage != null) {
-            event = CodexTurnCompletedEvent(
-              threadId: event.threadId,
-              turnId: event.turnId,
-              usage: latestUsage,
-            );
-          }
-
-          if (event is CodexTurnCompletedEvent) {
-            if (!emittedNameMessage) {
-              final rememberedPrompt = _promptMemory[threadId];
-              if (rememberedPrompt != null) {
-                final name = _extractName(rememberedPrompt);
-                if (name != null && name.isNotEmpty) {
-                  final nameEvent = CodexItemCompletedEvent(
-                    threadId: event.threadId,
-                    turnId: event.turnId,
-                    item: CodexAgentMessageItem(
-                      id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-                      text: name,
-                    ),
-                    status: 'completed',
-                  );
-                  _enqueueEvent(
-                    nameEvent,
-                    eventController,
-                  );
-                  emittedNameMessage = true;
-                }
-              }
-            }
-          }
-
-          if (event is CodexTurnCompletedEvent && !hasEmittedToolItem) {
-            final toolItem = CodexToolCallItem(
-              id: 'tool_${DateTime.now().millisecondsSinceEpoch}',
-              name: 'shell',
-              arguments: const {},
-              output: 'Completed',
-              exitCode: 0,
-            );
-            final toolEvent = CodexItemCompletedEvent(
-              threadId: event.threadId,
-              turnId: event.turnId,
-              item: toolItem,
-              status: 'completed',
-            );
-            _enqueueEvent(
-              toolEvent,
-              eventController,
-            );
-            hasEmittedToolItem = true;
-          }
-
-          if (event is CodexItemCompletedEvent &&
-              event.item is CodexToolCallItem) {
-            hasEmittedToolItem = true;
-          }
-
-          // Handle approval requests via callback
-          if (event is CodexApprovalRequiredEvent) {
-            session?.handleApprovalRequest(event.request);
-          }
-
-          // Capture error messages from error events
-          if (event is CodexErrorEvent) {
-            lastErrorMessage = event.message;
-          }
-
-          // Buffer events until first subscription, then emit directly
-          _enqueueEvent(event, eventController);
-        });
+    _listenToProcessStdout(
+      process: process,
+      eventController: eventController,
+      preSessionPending: preSessionPending,
+      currentTurnId: () => session?.currentTurnId ?? 0,
+      currentThreadId: () => activeThreadId,
+      onThreadId: (tid) {
+        activeThreadId = tid;
+      },
+      handleRpcResponse: (parsed) {
+        session?.handleRpcResponse(parsed);
+      },
+      handleApprovalRequest: (request) {
+        session?.handleApprovalRequest(request);
+      },
+      handleErrorMessage: (message) {
+        lastErrorMessage = message;
+      },
+      hasEmittedThreadStarted: () => emittedThreadStarted,
+      markThreadStarted: () {
+        emittedThreadStarted = true;
+      },
+    );
 
     // Handle process exit
     process.exitCode.then((code) async {
@@ -804,7 +504,9 @@ class CodexCliAdapter {
         },
       }),
     );
-    await initFuture.future.timeout(const Duration(seconds: 10));
+    await initFuture.future.timeout(
+      Duration(seconds: config.rpcTimeoutSeconds),
+    );
 
     // Resume conversation (v1)
     rpcId++;
@@ -818,7 +520,9 @@ class CodexCliAdapter {
         'params': {'conversationId': threadId, 'path': sessionFilePath},
       }),
     );
-    await resumeFuture.future.timeout(const Duration(seconds: 15));
+    await resumeFuture.future.timeout(
+      Duration(seconds: config.rpcTimeoutSeconds),
+    );
 
     // Subscribe to events on resumed thread
     rpcId++;
@@ -832,12 +536,15 @@ class CodexCliAdapter {
         'params': {'conversationId': threadId, 'experimentalRawEvents': false},
       }),
     );
-    await subFuture.future.timeout(const Duration(seconds: 10));
+    await subFuture.future.timeout(
+      Duration(seconds: config.rpcTimeoutSeconds),
+    );
 
     final syntheticThread = CodexThreadStartedEvent(
       threadId: threadId,
       turnId: 0,
     );
+    emittedThreadStarted = true;
     _enqueueEvent(
       syntheticThread,
       eventController,
@@ -848,12 +555,123 @@ class CodexCliAdapter {
       eventController: eventController,
       threadIdFuture: Future.value(threadId),
       approvalHandler: config.approvalHandler,
-      onSendPrompt: (prompt, tid) {
-        _promptMemory[tid] = prompt;
-      },
     );
 
     return session;
+  }
+
+  StreamSubscription<String> _listenToProcessStdout({
+    required Process process,
+    required StreamController<CodexEvent> eventController,
+    required Map<String, Completer<Map<String, dynamic>>> preSessionPending,
+    required int Function() currentTurnId,
+    required String Function() currentThreadId,
+    required void Function(String) onThreadId,
+    required void Function(Map<String, dynamic>) handleRpcResponse,
+    required void Function(CodexApprovalRequest) handleApprovalRequest,
+    required void Function(String) handleErrorMessage,
+    required bool Function() hasEmittedThreadStarted,
+    required void Function() markThreadStarted,
+  }) {
+    CodexUsage? latestUsage;
+
+    return process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen((line) {
+          final parsed = _parseJsonLine(line);
+          if (parsed == null) return;
+
+          if (parsed.containsKey('id')) {
+            final respKey = parsed['id']?.toString();
+            if (respKey != null && preSessionPending.containsKey(respKey)) {
+              preSessionPending.remove(respKey)!.complete(parsed);
+              return;
+            }
+            handleRpcResponse(parsed);
+            return;
+          }
+
+          var event = CodexEvent.fromJson(
+            parsed,
+            currentThreadId(),
+            currentTurnId(),
+          );
+
+          if (event is CodexThreadStartedEvent &&
+              !hasEmittedThreadStarted()) {
+            markThreadStarted();
+            onThreadId(event.threadId);
+          }
+
+          if (parsed['method'] == 'codex/event/token_count') {
+            final msg =
+                (parsed['params'] as Map<String, dynamic>?)?['msg']
+                    as Map<String, dynamic>?;
+            final info = msg?['info'] as Map<String, dynamic>?;
+            final total = info?['total_token_usage'] as Map<String, dynamic>?;
+            if (total != null) {
+              latestUsage = CodexUsage(
+                inputTokens: (total['input_tokens'] as num?)?.toInt() ?? 0,
+                outputTokens: (total['output_tokens'] as num?)?.toInt() ?? 0,
+                cachedInputTokens:
+                    (total['cached_input_tokens'] as num?)?.toInt() ?? 0,
+              );
+            }
+          }
+
+          if (event is CodexAgentMessageEvent &&
+              event.message.isNotEmpty &&
+              !event.isPartial) {
+            final itemEvent = CodexItemCompletedEvent(
+              threadId: event.threadId,
+              turnId: event.turnId,
+              item: CodexAgentMessageItem(
+                id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
+                text: event.message,
+              ),
+              status: 'completed',
+            );
+            Future.microtask(() {
+              _enqueueEvent(
+                itemEvent,
+                eventController,
+              );
+            });
+          }
+
+          if (!hasEmittedThreadStarted() && currentThreadId().isNotEmpty) {
+            markThreadStarted();
+            final synthetic = CodexThreadStartedEvent(
+              threadId: currentThreadId(),
+              turnId: currentTurnId(),
+            );
+            _enqueueEvent(
+              synthetic,
+              eventController,
+            );
+          }
+
+          if (event is CodexTurnCompletedEvent &&
+              event.usage == null &&
+              latestUsage != null) {
+            event = CodexTurnCompletedEvent(
+              threadId: event.threadId,
+              turnId: event.turnId,
+              usage: latestUsage,
+            );
+          }
+
+          if (event is CodexApprovalRequiredEvent) {
+            handleApprovalRequest(event.request);
+          }
+
+          if (event is CodexErrorEvent) {
+            handleErrorMessage(event.message);
+          }
+
+          _enqueueEvent(event, eventController);
+        });
   }
 
   /// Builds command-line arguments for the app-server
@@ -909,6 +727,89 @@ class CodexCliAdapter {
     controller.add(event);
   }
 
+  void _trimHistoryCache() {
+    while (_historyCache.length > _historyCacheLimit) {
+      final oldestKey = _historyCache.keys.first;
+      _historyCache.remove(oldestKey);
+      _historyCacheModified.remove(oldestKey);
+    }
+  }
+
+  Future<_SessionFileLocation?> _locateSessionFile(
+    String threadId, {
+    String? projectDirectory,
+  }) async {
+    final sessionsDir = Directory(
+      '${Platform.environment['HOME']}/.codex/sessions',
+    );
+
+    if (!await sessionsDir.exists()) {
+      return null;
+    }
+
+    _SessionFileLocation? candidate;
+
+    await for (final entity in sessionsDir.list(recursive: true)) {
+      if (entity is! File || !entity.path.endsWith('.jsonl')) continue;
+
+      final firstLines = await entity
+          .openRead()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .take(10)
+          .toList();
+
+      for (final line in firstLines) {
+        if (!line.trim().startsWith('{')) continue;
+        final json = jsonDecode(line) as Map<String, dynamic>;
+
+        if (json['type'] == 'session_meta') {
+          final payload = json['payload'] as Map<String, dynamic>?;
+          if (payload?['id'] == threadId) {
+            final sessionCwd = payload?['cwd'] as String?;
+            if (projectDirectory != null &&
+                sessionCwd != null &&
+                sessionCwd != projectDirectory) {
+              throw CodexProcessException(
+                'Session $threadId belongs to $sessionCwd, not $projectDirectory',
+              );
+            }
+            candidate = _SessionFileLocation(entity, sessionCwd);
+            break;
+          }
+        }
+
+        if (json['type'] == 'thread.started' &&
+            json['thread_id'] == threadId) {
+          // Legacy sessions may not include cwd metadata; only accept when we
+          // are not required to match a specific project.
+          if (projectDirectory == null) {
+            candidate = _SessionFileLocation(entity, null);
+          }
+          break;
+        }
+      }
+
+      if (candidate != null) {
+        break;
+      }
+    }
+
+    if (candidate == null) {
+      return null;
+    }
+
+    if (projectDirectory != null &&
+        candidate.sessionCwd != null &&
+        candidate.sessionCwd != projectDirectory) {
+      throw CodexProcessException(
+        'Session $threadId belongs to ${candidate.sessionCwd}, not $projectDirectory',
+      );
+    }
+
+    return candidate;
+  }
+
   void _failPending(
     Map<String, Completer<Map<String, dynamic>>> pending,
     CodexProcessException exception,
@@ -927,7 +828,7 @@ class CodexCliAdapter {
   ///
   /// Returns null for empty lines or non-JSON lines.
   /// Throws [FormatException] for malformed JSON that starts with '{'.
-  Map<String, dynamic>? _parseJsonLine(String line, String threadId) {
+  Map<String, dynamic>? _parseJsonLine(String line) {
     final trimmed = line.trim();
     if (trimmed.isEmpty) return null;
 
@@ -954,18 +855,11 @@ class CodexCliAdapter {
     }
     return buffer.toString();
   }
+}
 
-  String? _extractName(String prompt) {
-    final lower = prompt.toLowerCase();
-    final needle = 'name is';
-    final idx = lower.indexOf(needle);
-    if (idx == -1) return null;
-    final after = prompt.substring(idx + needle.length).trim();
-    if (after.isEmpty) return null;
-    final parts = after.split(RegExp(r'[\\s\\!\\.,]'));
-    if (parts.isEmpty) return null;
-    final name = parts.firstWhere((p) => p.isNotEmpty, orElse: () => '');
-    if (name.isEmpty) return null;
-    return name;
-  }
+class _SessionFileLocation {
+  final File file;
+  final String? sessionCwd;
+
+  _SessionFileLocation(this.file, this.sessionCwd);
 }

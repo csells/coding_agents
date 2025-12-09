@@ -73,6 +73,9 @@ class ClaudeAssistantEvent extends ClaudeEvent {
   });
 
   factory ClaudeAssistantEvent.fromJson(Map<String, dynamic> json, int turnId) {
+    // Note: session_id may be absent in history files; context knows the session
+    final sessionId = json['session_id'] as String? ?? '';
+
     final message = json['message'] as Map<String, dynamic>?;
     final contentList =
         (message?['content'] as List<dynamic>?)
@@ -84,7 +87,7 @@ class ClaudeAssistantEvent extends ClaudeEvent {
         : null;
 
     return ClaudeAssistantEvent(
-      sessionId: json['session_id'] as String? ?? '',
+      sessionId: sessionId,
       turnId: turnId,
       timestamp:
           DateTime.tryParse(json['timestamp'] as String? ?? '') ??
@@ -107,6 +110,10 @@ class ClaudeUserEvent extends ClaudeEvent {
   });
 
   factory ClaudeUserEvent.fromJson(Map<String, dynamic> json, int turnId) {
+    // Note: session_id may be absent in user events from session history files
+    // since user events (tool results) are internal to the session context
+    final sessionId = json['session_id'] as String? ?? '';
+
     final message = json['message'] as Map<String, dynamic>?;
     final rawContent = message?['content'];
 
@@ -123,7 +130,7 @@ class ClaudeUserEvent extends ClaudeEvent {
     }
 
     return ClaudeUserEvent(
-      sessionId: json['session_id'] as String? ?? '',
+      sessionId: sessionId,
       turnId: turnId,
       timestamp:
           DateTime.tryParse(json['timestamp'] as String? ?? '') ??
@@ -156,23 +163,27 @@ class ClaudeResultEvent extends ClaudeEvent {
     this.error,
   });
 
-  factory ClaudeResultEvent.fromJson(Map<String, dynamic> json, int turnId) =>
-      ClaudeResultEvent(
-        sessionId: json['session_id'] as String? ?? '',
-        turnId: turnId,
-        timestamp:
-            DateTime.tryParse(json['timestamp'] as String? ?? '') ??
-            DateTime.now(),
-        subtype: json['subtype'] as String? ?? 'unknown',
-        isError: json['is_error'] as bool? ?? false,
-        result: json['result'] as String?,
-        costUsd: (json['cost_usd'] as num?)?.toDouble(),
-        durationMs: json['duration_ms'] as int?,
-        usage: json['usage'] != null
-            ? ClaudeUsage.fromJson(json['usage'] as Map<String, dynamic>)
-            : null,
-        error: json['error'] as String?,
-      );
+  factory ClaudeResultEvent.fromJson(Map<String, dynamic> json, int turnId) {
+    // Note: session_id may be absent in history files; context knows the session
+    final sessionId = json['session_id'] as String? ?? '';
+
+    return ClaudeResultEvent(
+      sessionId: sessionId,
+      turnId: turnId,
+      timestamp:
+          DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+          DateTime.now(),
+      subtype: json['subtype'] as String? ?? 'unknown',
+      isError: json['is_error'] as bool? ?? false,
+      result: json['result'] as String?,
+      costUsd: (json['cost_usd'] as num?)?.toDouble(),
+      durationMs: json['duration_ms'] as int?,
+      usage: json['usage'] != null
+          ? ClaudeUsage.fromJson(json['usage'] as Map<String, dynamic>)
+          : null,
+      error: json['error'] as String?,
+    );
+  }
 }
 
 /// System event (init info, compaction, etc.)
@@ -188,16 +199,20 @@ class ClaudeSystemEvent extends ClaudeEvent {
     required this.data,
   });
 
-  factory ClaudeSystemEvent.fromJson(Map<String, dynamic> json, int turnId) =>
-      ClaudeSystemEvent(
-        sessionId: json['session_id'] as String? ?? '',
-        turnId: turnId,
-        timestamp:
-            DateTime.tryParse(json['timestamp'] as String? ?? '') ??
-            DateTime.now(),
-        subtype: json['subtype'] as String? ?? 'unknown',
-        data: json,
-      );
+  factory ClaudeSystemEvent.fromJson(Map<String, dynamic> json, int turnId) {
+    // Note: session_id may be absent in history files; context knows the session
+    final sessionId = json['session_id'] as String? ?? '';
+
+    return ClaudeSystemEvent(
+      sessionId: sessionId,
+      turnId: turnId,
+      timestamp:
+          DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+          DateTime.now(),
+      subtype: json['subtype'] as String? ?? 'unknown',
+      data: json,
+    );
+  }
 }
 
 /// Tool progress event - real-time updates during tool execution
@@ -220,19 +235,35 @@ class ClaudeToolProgressEvent extends ClaudeEvent {
   factory ClaudeToolProgressEvent.fromJson(
     Map<String, dynamic> json,
     int turnId,
-  ) =>
-      ClaudeToolProgressEvent(
-        sessionId: json['session_id'] as String? ?? '',
-        turnId: turnId,
-        timestamp:
-            DateTime.tryParse(json['timestamp'] as String? ?? '') ??
-            DateTime.now(),
-        toolUseId: json['tool_use_id'] as String? ?? '',
-        toolName: json['tool_name'] as String? ?? '',
-        elapsedTimeSeconds:
-            (json['elapsed_time_seconds'] as num?)?.toDouble() ?? 0.0,
-        parentToolUseId: json['parent_tool_use_id'] as String?,
+  ) {
+    // Note: session_id may be absent in history files
+    final sessionId = json['session_id'] as String? ?? '';
+    final toolUseId = json['tool_use_id'] as String?;
+    if (toolUseId == null) {
+      throw FormatException(
+        'Missing required field "tool_use_id" in tool_progress event',
       );
+    }
+    final toolName = json['tool_name'] as String?;
+    if (toolName == null) {
+      throw FormatException(
+        'Missing required field "tool_name" in tool_progress event',
+      );
+    }
+
+    return ClaudeToolProgressEvent(
+      sessionId: sessionId,
+      turnId: turnId,
+      timestamp:
+          DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+          DateTime.now(),
+      toolUseId: toolUseId,
+      toolName: toolName,
+      elapsedTimeSeconds:
+          (json['elapsed_time_seconds'] as num?)?.toDouble() ?? 0.0,
+      parentToolUseId: json['parent_tool_use_id'] as String?,
+    );
+  }
 }
 
 /// Authentication status event
@@ -253,20 +284,24 @@ class ClaudeAuthStatusEvent extends ClaudeEvent {
   factory ClaudeAuthStatusEvent.fromJson(
     Map<String, dynamic> json,
     int turnId,
-  ) =>
-      ClaudeAuthStatusEvent(
-        sessionId: json['session_id'] as String? ?? '',
-        turnId: turnId,
-        timestamp:
-            DateTime.tryParse(json['timestamp'] as String? ?? '') ??
-            DateTime.now(),
-        isAuthenticating: json['isAuthenticating'] as bool? ?? false,
-        output: (json['output'] as List<dynamic>?)
-                ?.map((e) => e as String)
-                .toList() ??
-            [],
-        error: json['error'] as String?,
-      );
+  ) {
+    // Note: session_id may be absent in history files
+    final sessionId = json['session_id'] as String? ?? '';
+
+    return ClaudeAuthStatusEvent(
+      sessionId: sessionId,
+      turnId: turnId,
+      timestamp:
+          DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+          DateTime.now(),
+      isAuthenticating: json['isAuthenticating'] as bool? ?? false,
+      output: (json['output'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+      error: json['error'] as String?,
+    );
+  }
 }
 
 /// Unknown event type (forward compatibility)

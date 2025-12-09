@@ -2,17 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../shared_utils.dart';
 import 'gemini_events.dart';
 import 'gemini_types.dart';
 
 /// Exception thrown when Gemini process encounters an error
-class GeminiProcessException implements Exception {
-  final String message;
-
-  GeminiProcessException(this.message);
+class GeminiProcessException extends CliProcessException {
+  GeminiProcessException(super.message);
 
   @override
-  String toString() => 'GeminiProcessException: $message';
+  String get adapterName => 'GeminiProcessException';
 }
 
 /// A Gemini CLI session that manages process lifecycle and event streaming
