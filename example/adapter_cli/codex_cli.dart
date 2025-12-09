@@ -212,9 +212,8 @@ Future<void> _oneShot(
         }
       case CodexItemCompletedEvent():
         final item = event.item;
-        if (item is CodexAgentMessageItem) {
-          stdout.write(item.text);
-        } else if (item is CodexToolCallItem) {
+        // Note: Don't print CodexAgentMessageItem here - already printed via CodexAgentMessageEvent
+        if (item is CodexToolCallItem) {
           print('\n[Tool: ${item.name}(${_formatArgs(item.arguments)})]');
         }
       case CodexApprovalRequiredEvent():
@@ -342,9 +341,8 @@ Future<void> _repl(
           }
         case CodexItemCompletedEvent():
           final item = event.item;
-          if (item is CodexAgentMessageItem) {
-            stdout.write(item.text);
-          } else if (item is CodexToolCallItem) {
+          // Note: Don't print CodexAgentMessageItem here - already printed via CodexAgentMessageEvent
+          if (item is CodexToolCallItem) {
             print('\n[Tool: ${item.name}(${_formatArgs(item.arguments)})]');
           }
         case CodexApprovalRequiredEvent():
