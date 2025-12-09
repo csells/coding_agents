@@ -26,8 +26,9 @@ Low-level adapters for direct CLI interaction:
 
 - **Claude Code Adapter**: Long-lived bidirectional JSONL sessions with
   streaming events, multi-turn conversations, and session resumption
-- **Codex CLI Adapter**: Process-per-turn model with thread-based session
-  management and full-auto mode support
+- **Codex CLI Adapter**: App-server v2 JSON-RPC (`thread/start`, `turn/start`,
+  `item/*`) with streaming deltas, approvals, and thread-based session
+  management (process-per-turn by default)
 - **Gemini CLI Adapter**: Process-per-turn model with sandbox mode and session
   resumption via UUID
 
@@ -289,6 +290,9 @@ Run tests against all three agents:
 ```bash
 ./example/test_cli_agents.sh
 ```
+
+The script exercises one-shot prompts, session listing, resume flows, and a
+quick REPL exit for Claude, Codex, and Gemini.
 
 ### Adapter-Specific CLIs
 

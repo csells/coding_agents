@@ -35,10 +35,10 @@ void main() {
   group('Codex Adapter Integration', () {
     test('createSession returns session with valid thread_id', () async {
       final session = await client.createSession(
-        'Say exactly: "Hello"',
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Say exactly: "Hello"');
 
       expect(session.threadId, isNotNull);
       expect(session.threadId, isNotEmpty);
@@ -65,10 +65,10 @@ void main() {
 
     test('session streams agent_message content', () async {
       final session = await client.createSession(
-        'Respond with exactly: "Test response"',
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Respond with exactly: "Test response"');
 
       final agentMessages = <CodexAgentMessageItem>[];
 
@@ -96,9 +96,11 @@ void main() {
 
     test('session executes tool and returns tool_call item', () async {
       final session = await client.createSession(
-        'Use the shell tool to run: echo "test output". Do not skip this step.',
         config,
         projectDirectory: testWorkDir,
+      );
+      await session.send(
+        'Use the shell tool to run: echo "test output". Do not skip this step.',
       );
 
       final toolItems = <CodexToolCallItem>[];
@@ -125,10 +127,10 @@ void main() {
 
     test('turn.completed event contains usage stats', () async {
       final session = await client.createSession(
-        'Say: "Done"',
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Say: "Done"');
 
       CodexTurnCompletedEvent? turnCompleted;
 
@@ -156,10 +158,10 @@ void main() {
     test('can resume session with resumeSession', () async {
       // First turn - create a session
       final session1 = await client.createSession(
-        'Hi! My name is Chris!',
         config,
         projectDirectory: testWorkDir,
       );
+      await session1.send('Hi! My name is Chris!');
 
       final threadId = session1.threadId;
 
@@ -171,10 +173,10 @@ void main() {
       // Second turn - resume session
       final session2 = await client.resumeSession(
         threadId,
-        'Say my name.',
         config,
         projectDirectory: testWorkDir,
       );
+      await session2.send('Say my name.');
 
       expect(
         session2.threadId,
@@ -205,10 +207,10 @@ void main() {
 
     test('session events include correct turnId', () async {
       final session = await client.createSession(
-        'Say: "Turn test"',
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Say: "Turn test"');
 
       final turnIds = <int>{};
 
@@ -233,10 +235,10 @@ void main() {
     test('listSessions returns sessions including created session', () async {
       // Create a session
       final session = await client.createSession(
-        'Say: "List test"',
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Say: "List test"');
 
       final threadId = session.threadId;
 
@@ -265,7 +267,6 @@ void main() {
       );
 
       final session = await client.createSession(
-        'Say hello',
         badConfig,
         projectDirectory: testWorkDir,
       );
@@ -273,6 +274,7 @@ void main() {
       // Expect the exception to include the actual error message
       expect(
         () async {
+          await session.send('Say hello');
           await for (final event in session.events) {
             if (event is CodexTurnCompletedEvent) break;
           }
@@ -303,10 +305,10 @@ void main() {
       expect(
         () async {
           final session = await client.createSession(
-            'Say hello',
             badConfig,
             projectDirectory: testWorkDir,
           );
+          await session.send('Say hello');
           await for (final event in session.events) {
             if (event is CodexTurnCompletedEvent) break;
           }
@@ -328,10 +330,10 @@ void main() {
 
       // Create a session
       final session = await client.createSession(
-        testPrompt,
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send(testPrompt);
       final threadId = session.threadId;
 
       // Wait for session to complete
@@ -356,10 +358,10 @@ void main() {
 
       // Create a session
       final session = await client.createSession(
-        testPrompt,
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send(testPrompt);
       final threadId = session.threadId;
 
       // Wait for session to complete
@@ -402,10 +404,10 @@ void main() {
 
       // Create a session
       final session = await client.createSession(
-        testPrompt,
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send(testPrompt);
       final threadId = session.threadId;
 
       // Wait for session to complete

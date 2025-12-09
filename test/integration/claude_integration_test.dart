@@ -34,13 +34,10 @@ void main() {
   group('Claude Adapter Integration', () {
     test('createSession returns session with valid session_id', () async {
       final session = await client.createSession(
-        'Say exactly: "Hello"',
         config,
         projectDirectory: testWorkDir,
       );
-
-      expect(session.sessionId, isNotNull);
-      expect(session.sessionId, isNotEmpty);
+      await session.send('Say exactly: "Hello"');
 
       // Collect events until result
       final events = <ClaudeEvent>[];
@@ -48,6 +45,10 @@ void main() {
         events.add(event);
         if (event is ClaudeResultEvent) break;
       }
+
+      // Session ID is populated after init event arrives
+      expect(session.sessionId, isNotNull);
+      expect(session.sessionId, isNotEmpty);
 
       // Verify we got expected event types
       expect(
@@ -64,10 +65,10 @@ void main() {
 
     test('session streams assistant message content', () async {
       final session = await client.createSession(
-        'Respond with exactly: "Test response"',
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Respond with exactly: "Test response"');
 
       final assistantEvents = <ClaudeAssistantEvent>[];
 
@@ -99,9 +100,11 @@ void main() {
         );
 
         final session = await client.createSession(
-          'Read the file pubspec.yaml and tell me the package name',
           toolConfig,
           projectDirectory: testWorkDir,
+        );
+        await session.send(
+          'Read the file pubspec.yaml and tell me the package name',
         );
 
         final toolUseBlocks = <ClaudeToolUseBlock>[];
@@ -151,9 +154,11 @@ void main() {
       );
 
       final session = await client.createSession(
-        'Read the file pubspec.yaml and tell me the package name',
         toolConfig,
         projectDirectory: testWorkDir,
+      );
+      await session.send(
+        'Read the file pubspec.yaml and tell me the package name',
       );
 
       await for (final event in session.events) {
@@ -169,10 +174,10 @@ void main() {
 
     test('result event contains success status', () async {
       final session = await client.createSession(
-        'Say: "Done"',
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Say: "Done"');
 
       ClaudeResultEvent? resultEvent;
 
@@ -199,31 +204,26 @@ void main() {
     test('can resume session with resumeSession', () async {
       // First turn - create a session
       final session1 = await client.createSession(
-        'Hi! My name is Chris!',
         config,
         projectDirectory: testWorkDir,
       );
-
-      final sessionId = session1.sessionId;
+      await session1.send('Hi! My name is Chris!');
 
       // Wait for first session to complete
       await for (final event in session1.events) {
         if (event is ClaudeResultEvent) break;
       }
 
+      // Session ID is now available after events are collected
+      final sessionId = session1.sessionId!;
+
       // Second turn - resume session
       final session2 = await client.resumeSession(
         sessionId,
-        'Say my name.',
         config,
         projectDirectory: testWorkDir,
       );
-
-      expect(
-        session2.sessionId,
-        equals(sessionId),
-        reason: 'Resumed session should have same ID',
-      );
+      await session2.send('Say my name.');
 
       final responses = <String>[];
 
@@ -238,6 +238,13 @@ void main() {
         if (event is ClaudeResultEvent) break;
       }
 
+      // Session ID should match after resumed session's events are collected
+      expect(
+        session2.sessionId,
+        equals(sessionId),
+        reason: 'Resumed session should have same ID',
+      );
+
       // The response should mention Chris
       final fullResponse = responses.join(' ').toLowerCase();
       expect(
@@ -249,10 +256,10 @@ void main() {
 
     test('session events include correct turnId', () async {
       final session = await client.createSession(
-        'Say: "Turn test"',
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Say: "Turn test"');
 
       final turnIds = <int>{};
 
@@ -277,17 +284,18 @@ void main() {
     test('listSessions returns sessions including created session', () async {
       // Create a session
       final session = await client.createSession(
-        'Say: "List test"',
         config,
         projectDirectory: testWorkDir,
       );
-
-      final sessionId = session.sessionId;
+      await session.send('Say: "List test"');
 
       // Wait for session to complete
       await for (final event in session.events) {
         if (event is ClaudeResultEvent) break;
       }
+
+      // Session ID is now available after events are collected
+      final sessionId = session.sessionId!;
 
       // List sessions
       final sessions = await client.listSessions(projectDirectory: testWorkDir);
@@ -309,7 +317,6 @@ void main() {
       );
 
       final session = await client.createSession(
-        'Say hello',
         badConfig,
         projectDirectory: testWorkDir,
       );
@@ -317,6 +324,7 @@ void main() {
       // Expect exception to be thrown with error details
       expect(
         () async {
+          await session.send('Say hello');
           await for (final event in session.events) {
             if (event is ClaudeResultEvent) break;
           }
@@ -339,26 +347,43 @@ void main() {
         extraArgs: ['--fail-for-me-please'],
       );
 
-      // Expect createSession to fail with CLI error details
-      expect(
-        () async {
-          final session = await client.createSession(
-            'Say hello',
-            badConfig,
-            projectDirectory: testWorkDir,
-          );
-          await for (final event in session.events) {
-            if (event is ClaudeResultEvent) break;
+      // With --input-format stream-json, CLI exits immediately on invalid args
+      // The exception may be thrown at any point in the flow
+      ClaudeProcessException? caughtException;
+
+      final session = await client.createSession(
+        badConfig,
+        projectDirectory: testWorkDir,
+      );
+
+      // Listen for errors on the stream
+      session.events.listen(
+        (_) {},
+        onError: (error) {
+          if (error is ClaudeProcessException) {
+            caughtException = error;
           }
         },
-        throwsA(
-          isA<ClaudeProcessException>().having(
-            (e) => e.message,
-            'message',
-            // Claude CLI outputs: "error: unknown option '--fail-for-me-please'"
-            contains('unknown'),
-          ),
-        ),
+      );
+
+      // Send prompt (may fail if process already dead)
+      try {
+        await session.send('Say hello');
+      } on ClaudeProcessException catch (e) {
+        caughtException = e;
+      }
+
+      // Wait for error to be delivered
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      expect(
+        caughtException,
+        isNotNull,
+        reason: 'Should throw ClaudeProcessException for CLI errors',
+      );
+      expect(
+        caughtException!.message,
+        contains('unknown'),
         reason: 'Exception should contain error details from CLI stderr',
       );
     });
@@ -368,16 +393,18 @@ void main() {
 
       // Create a session
       final session = await client.createSession(
-        testPrompt,
         config,
         projectDirectory: testWorkDir,
       );
-      final sessionId = session.sessionId;
+      await session.send(testPrompt);
 
       // Wait for session to complete
       await for (final event in session.events) {
         if (event is ClaudeResultEvent) break;
       }
+
+      // Session ID is now available after events are collected
+      final sessionId = session.sessionId!;
 
       // Get session history
       final history = await client.getSessionHistory(
@@ -406,16 +433,18 @@ void main() {
 
       // Create a session
       final session = await client.createSession(
-        testPrompt,
         config,
         projectDirectory: testWorkDir,
       );
-      final sessionId = session.sessionId;
+      await session.send(testPrompt);
 
       // Wait for session to complete
       await for (final event in session.events) {
         if (event is ClaudeResultEvent) break;
       }
+
+      // Session ID is now available after events are collected
+      final sessionId = session.sessionId!;
 
       // Get session history
       final history = await client.getSessionHistory(
@@ -452,16 +481,18 @@ void main() {
 
       // Create a session
       final session = await client.createSession(
-        testPrompt,
         config,
         projectDirectory: testWorkDir,
       );
-      final sessionId = session.sessionId;
+      await session.send(testPrompt);
 
       // Wait for session to complete
       await for (final event in session.events) {
         if (event is ClaudeResultEvent) break;
       }
+
+      // Session ID is now available after events are collected
+      final sessionId = session.sessionId!;
 
       // Get session history twice - should work both times
       final history1 = await client.getSessionHistory(

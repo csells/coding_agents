@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:coding_agents/src/cli_adapters/claude_code/claude_code_cli_adapter.dart';
 import 'package:coding_agents/src/cli_adapters/claude_code/claude_config.dart';
 import 'package:coding_agents/src/cli_adapters/claude_code/claude_events.dart';
+import 'package:coding_agents/src/cli_adapters/claude_code/claude_session.dart';
 import 'package:coding_agents/src/cli_adapters/claude_code/claude_types.dart';
 import 'package:test/test.dart';
 
@@ -12,10 +13,8 @@ void main() {
       final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig();
 
-      final args = client.buildArgs(config, 'test prompt', null);
+      final args = client.buildArgs(config, null);
 
-      expect(args, contains('-p'));
-      expect(args, contains('test prompt'));
       expect(args, contains('--output-format'));
       expect(args, contains('stream-json'));
     });
@@ -24,7 +23,7 @@ void main() {
       final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig();
 
-      final args = client.buildArgs(config, 'continue', 'sess_abc123');
+      final args = client.buildArgs(config, 'sess_abc123');
 
       expect(args, contains('--resume'));
       expect(args, contains('sess_abc123'));
@@ -36,7 +35,7 @@ void main() {
         permissionMode: ClaudePermissionMode.acceptEdits,
       );
 
-      final args = client.buildArgs(config, 'test', null);
+      final args = client.buildArgs(config, null);
 
       expect(args, contains('--permission-mode'));
       expect(args, contains('acceptEdits'));
@@ -48,7 +47,7 @@ void main() {
         permissionMode: ClaudePermissionMode.bypassPermissions,
       );
 
-      final args = client.buildArgs(config, 'test', null);
+      final args = client.buildArgs(config, null);
 
       expect(args, contains('--dangerously-skip-permissions'));
     });
@@ -62,7 +61,7 @@ void main() {
         ),
       );
 
-      final args = client.buildArgs(config, 'test', null);
+      final args = client.buildArgs(config, null);
 
       expect(args, contains('--permission-prompt-tool'));
       expect(args.any((a) => a.contains('mcp__')), isTrue);
@@ -72,7 +71,7 @@ void main() {
       final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(model: 'claude-opus-4-5-20251101');
 
-      final args = client.buildArgs(config, 'test', null);
+      final args = client.buildArgs(config, null);
 
       expect(args, contains('--model'));
       expect(args, contains('claude-opus-4-5-20251101'));
@@ -84,7 +83,7 @@ void main() {
         systemPrompt: 'You are a code reviewer.',
       );
 
-      final args = client.buildArgs(config, 'test', null);
+      final args = client.buildArgs(config, null);
 
       expect(args, contains('--system-prompt'));
       expect(args, contains('You are a code reviewer.'));
@@ -94,7 +93,7 @@ void main() {
       final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(appendSystemPrompt: 'Be concise.');
 
-      final args = client.buildArgs(config, 'test', null);
+      final args = client.buildArgs(config, null);
 
       expect(args, contains('--append-system-prompt'));
       expect(args, contains('Be concise.'));
@@ -104,7 +103,7 @@ void main() {
       final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(maxTurns: 5);
 
-      final args = client.buildArgs(config, 'test', null);
+      final args = client.buildArgs(config, null);
 
       expect(args, contains('--max-turns'));
       expect(args, contains('5'));
@@ -114,7 +113,7 @@ void main() {
       final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(allowedTools: ['Read', 'Edit']);
 
-      final args = client.buildArgs(config, 'test', null);
+      final args = client.buildArgs(config, null);
 
       expect(args, contains('--allowedTools'));
       expect(args, contains('Read'));
@@ -125,7 +124,7 @@ void main() {
       final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(disallowedTools: ['Bash', 'Write']);
 
-      final args = client.buildArgs(config, 'test', null);
+      final args = client.buildArgs(config, null);
 
       expect(args, contains('--disallowedTools'));
       expect(args, contains('Bash'));
@@ -169,7 +168,7 @@ void main() {
 
   group('ClaudeSession', () {
     test('formats user message correctly for send', () {
-      final message = ClaudeCodeCliAdapter.formatUserMessage('Hello Claude');
+      final message = ClaudeSession.formatUserMessage('Hello Claude');
 
       final parsed = jsonDecode(message);
       expect(parsed['type'], 'user');

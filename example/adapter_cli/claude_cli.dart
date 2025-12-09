@@ -188,22 +188,23 @@ Future<void> _oneShot(
   final config = ClaudeSessionConfig(
     permissionMode: yolo
         ? ClaudePermissionMode.bypassPermissions
-        : ClaudePermissionMode.defaultMode,
+        : ClaudePermissionMode.delegate,
+    permissionHandler: yolo ? null : _claudeApprovalHandler,
     maxTurns: 1,
   );
 
   final session = sessionId != null
       ? await client.resumeSession(
           sessionId,
-          prompt,
           config,
           projectDirectory: projectDir,
         )
       : await client.createSession(
-          prompt,
           config,
           projectDirectory: projectDir,
         );
+
+  await session.send(prompt);
 
   await for (final event in session.events) {
     switch (event) {
@@ -212,7 +213,7 @@ Future<void> _oneShot(
           if (block is ClaudeTextBlock) {
             stdout.write(block.text);
           } else if (block is ClaudeToolUseBlock) {
-            print('\n[Tool: ${block.name}]');
+            print('\n[Tool: ${block.name}(${_formatInput(block.input)})]');
           }
         }
       case ClaudeResultEvent():
@@ -222,6 +223,32 @@ Future<void> _oneShot(
         break;
     }
   }
+}
+
+/// Approval handler callback for Claude permission prompts
+Future<ClaudeToolPermissionResponse> _claudeApprovalHandler(
+  ClaudeToolPermissionRequest request,
+) async {
+  print('');
+  print('=== Approval Required ===');
+  print('Tool: ${request.toolName}');
+  print('Input: ${_formatInput(request.toolInput)}');
+  stdout.write('Yes/No/Always/neVer? [N]: ');
+
+  final input = stdin.readLineSync()?.trim().toLowerCase() ?? '';
+
+  return switch (input) {
+    'y' || 'yes' => ClaudeToolPermissionResponse(
+      behavior: ClaudePermissionBehavior.allow,
+    ),
+    'a' || 'always' => ClaudeToolPermissionResponse(
+      behavior: ClaudePermissionBehavior.allowAlways,
+    ),
+    'v' || 'never' => ClaudeToolPermissionResponse(
+      behavior: ClaudePermissionBehavior.denyAlways,
+    ),
+    _ => ClaudeToolPermissionResponse(behavior: ClaudePermissionBehavior.deny),
+  };
 }
 
 Future<void> _repl(
@@ -261,23 +288,24 @@ Future<void> _repl(
     final config = ClaudeSessionConfig(
       permissionMode: yolo
           ? ClaudePermissionMode.bypassPermissions
-          : ClaudePermissionMode.defaultMode,
+          : ClaudePermissionMode.delegate,
+      permissionHandler: yolo ? null : _claudeApprovalHandler,
     );
 
     final session = currentSessionId != null
         ? await client.resumeSession(
             currentSessionId,
-            input,
             config,
             projectDirectory: projectDir,
           )
         : await client.createSession(
-            input,
             config,
             projectDirectory: projectDir,
           );
 
     currentSessionId = session.sessionId;
+
+    await session.send(input);
 
     stdout.write('Claude: ');
     await for (final event in session.events) {
@@ -287,7 +315,7 @@ Future<void> _repl(
             if (block is ClaudeTextBlock) {
               stdout.write(block.text);
             } else if (block is ClaudeToolUseBlock) {
-              print('\n[Tool: ${block.name}]');
+              print('\n[Tool: ${block.name}(${_formatInput(block.input)})]');
             }
           }
         case ClaudeResultEvent():

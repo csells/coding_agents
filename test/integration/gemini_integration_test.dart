@@ -33,11 +33,11 @@ void main() {
 
   group('Gemini Adapter Integration', () {
     test('createSession returns session with valid session_id', () async {
-      final session = await client.createSession(
-        'Say exactly: "Hello"',
+      final session = client.createSession(
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Say exactly: "Hello"');
 
       expect(session.sessionId, isNotNull);
       expect(session.sessionId, isNotEmpty);
@@ -63,11 +63,11 @@ void main() {
     });
 
     test('session streams assistant message content', () async {
-      final session = await client.createSession(
-        'Respond with exactly: "Test response"',
+      final session = client.createSession(
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Respond with exactly: "Test response"');
 
       final assistantMessages = <GeminiMessageEvent>[];
 
@@ -91,10 +91,12 @@ void main() {
     });
 
     test('session executes tool and returns tool_use event', () async {
-      final session = await client.createSession(
-        'Read the file pubspec.yaml and tell me the package name',
+      final session = client.createSession(
         config,
         projectDirectory: testWorkDir,
+      );
+      await session.send(
+        'Read the file pubspec.yaml and tell me the package name',
       );
 
       final toolUseEvents = <GeminiToolUseEvent>[];
@@ -122,11 +124,11 @@ void main() {
     });
 
     test('result event contains success status and stats', () async {
-      final session = await client.createSession(
-        'Say: "Done"',
+      final session = client.createSession(
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Say: "Done"');
 
       GeminiResultEvent? resultEvent;
 
@@ -149,11 +151,11 @@ void main() {
 
     test('can resume session with resumeSession', () async {
       // First turn - create a session
-      final session1 = await client.createSession(
-        'Hi! My name is Chris!',
+      final session1 = client.createSession(
         config,
         projectDirectory: testWorkDir,
       );
+      await session1.send('Hi! My name is Chris!');
 
       final sessionId = session1.sessionId;
 
@@ -163,12 +165,12 @@ void main() {
       }
 
       // Second turn - resume session
-      final session2 = await client.resumeSession(
-        sessionId,
-        'Say my name.',
+      final session2 = client.resumeSession(
+        sessionId!,
         config,
         projectDirectory: testWorkDir,
       );
+      await session2.send('Say my name.');
 
       final responses = <String>[];
 
@@ -189,11 +191,11 @@ void main() {
     });
 
     test('session events include correct turnId', () async {
-      final session = await client.createSession(
-        'Say: "Turn test"',
+      final session = client.createSession(
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Say: "Turn test"');
 
       final turnIds = <int>{};
 
@@ -217,11 +219,11 @@ void main() {
 
     test('listSessions returns sessions including created session', () async {
       // Create a session
-      final session = await client.createSession(
-        'Say: "List test"',
+      final session = client.createSession(
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send('Say: "List test"');
 
       final sessionId = session.sessionId;
 
@@ -250,8 +252,7 @@ void main() {
         model: 'invalid-model-that-does-not-exist-xyz',
       );
 
-      final session = await client.createSession(
-        'Say hello',
+      final session = client.createSession(
         badConfig,
         projectDirectory: testWorkDir,
       );
@@ -260,6 +261,7 @@ void main() {
       // Gemini CLI outputs: [API Error: [{"error": {"code": 404, "message": "..."}}]]
       expect(
         () async {
+          await session.send('Say hello');
           await for (final event in session.events) {
             if (event is GeminiResultEvent) break;
           }
@@ -290,11 +292,11 @@ void main() {
       // Expect createSession to fail with CLI error details
       expect(
         () async {
-          final session = await client.createSession(
-            'Say hello',
+          final session = client.createSession(
             badConfig,
             projectDirectory: testWorkDir,
           );
+          await session.send('Say hello');
           await for (final event in session.events) {
             if (event is GeminiResultEvent) break;
           }
@@ -315,11 +317,11 @@ void main() {
       const testPrompt = 'Say exactly: "History test response"';
 
       // Create a session
-      final session = await client.createSession(
-        testPrompt,
+      final session = client.createSession(
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send(testPrompt);
       final sessionId = session.sessionId;
 
       // Wait for session to complete
@@ -329,7 +331,7 @@ void main() {
 
       // Get session history
       final history = await client.getSessionHistory(
-        sessionId,
+        sessionId!,
         projectDirectory: testWorkDir,
       );
 
@@ -351,11 +353,11 @@ void main() {
       const testPrompt = 'Say exactly: "First prompt response"';
 
       // Create a session
-      final session = await client.createSession(
-        testPrompt,
+      final session = client.createSession(
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send(testPrompt);
       final sessionId = session.sessionId;
 
       // Wait for session to complete
@@ -365,7 +367,7 @@ void main() {
 
       // Get session history
       final history = await client.getSessionHistory(
-        sessionId,
+        sessionId!,
         projectDirectory: testWorkDir,
       );
 
@@ -399,11 +401,11 @@ void main() {
       const testPrompt = 'Say exactly: "Idempotency test"';
 
       // Create a session
-      final session = await client.createSession(
-        testPrompt,
+      final session = client.createSession(
         config,
         projectDirectory: testWorkDir,
       );
+      await session.send(testPrompt);
       final sessionId = session.sessionId;
 
       // Wait for session to complete
@@ -413,7 +415,7 @@ void main() {
 
       // Get session history twice - should work both times
       final history1 = await client.getSessionHistory(
-        sessionId,
+        sessionId!,
         projectDirectory: testWorkDir,
       );
       final history2 = await client.getSessionHistory(

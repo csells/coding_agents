@@ -155,6 +155,51 @@ class CodexCliAdapter {
     return events;
   }
 
+  /// Find the session file path for a given threadId
+  ///
+  /// Returns the path to the JSONL file containing the session, or null if not found.
+  Future<String?> _findSessionFilePath(String threadId) async {
+    final sessionsDir = Directory(
+      '${Platform.environment['HOME']}/.codex/sessions',
+    );
+
+    if (!await sessionsDir.exists()) {
+      return null;
+    }
+
+    await for (final entity in sessionsDir.list(recursive: true)) {
+      if (entity is! File || !entity.path.endsWith('.jsonl')) continue;
+
+      // Check if this file contains our threadId
+      final firstLines = await entity
+          .openRead()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .take(10)
+          .toList();
+
+      for (final line in firstLines) {
+        if (!line.trim().startsWith('{')) continue;
+        final json = jsonDecode(line) as Map<String, dynamic>;
+
+        // Check session_meta event
+        if (json['type'] == 'session_meta') {
+          final payload = json['payload'] as Map<String, dynamic>?;
+          if (payload?['id'] == threadId) {
+            return entity.path;
+          }
+        }
+
+        // Check thread.started event
+        if (json['type'] == 'thread.started' && json['thread_id'] == threadId) {
+          return entity.path;
+        }
+      }
+    }
+
+    return null;
+  }
+
   Future<CodexSessionInfo?> _parseSessionFile(File file) async {
     final lines = await file
         .openRead()
@@ -220,12 +265,13 @@ class CodexCliAdapter {
     );
   }
 
-  /// Create a new Codex session with the given prompt
+  /// Create a new Codex session
   ///
   /// Spawns the Codex app-server for long-lived JSON-RPC communication.
   /// Returns a [CodexSession] that provides access to the event stream.
+  /// Call [CodexSession.send] to send the first prompt after subscribing
+  /// to the event stream.
   Future<CodexSession> createSession(
-    String prompt,
     CodexSessionConfig config, {
     required String projectDirectory,
   }) async {
@@ -245,8 +291,7 @@ class CodexCliAdapter {
       environment: config.environment,
     );
 
-    final eventController = StreamController<CodexEvent>.broadcast();
-    final bufferedEvents = <CodexEvent>[];
+    final eventController = StreamController<CodexEvent>();
     final stderrBuffer = StringBuffer();
     String? lastErrorMessage;
     CodexUsage? latestUsage;
@@ -255,11 +300,9 @@ class CodexCliAdapter {
 
     final threadIdCompleter = Completer<String>();
     final preSessionPending = <String, Completer<Map<String, dynamic>>>{};
-    var isSubscribed = false;
     String threadId = '';
     CodexSession? session;
     var rpcId = 0;
-    var turnCompletedEmitted = false;
 
     // Capture stderr for error reporting
     process.stderr.transform(utf8.decoder).listen((data) {
@@ -343,8 +386,6 @@ class CodexCliAdapter {
             Future.microtask(() {
               _enqueueEvent(
                 itemEvent,
-                isSubscribed,
-                bufferedEvents,
                 eventController,
               );
             });
@@ -358,8 +399,6 @@ class CodexCliAdapter {
             );
             _enqueueEvent(
               synthetic,
-              isSubscribed,
-              bufferedEvents,
               eventController,
             );
           }
@@ -372,10 +411,6 @@ class CodexCliAdapter {
               turnId: event.turnId,
               usage: latestUsage,
             );
-          }
-
-          if (event is CodexTurnCompletedEvent) {
-            turnCompletedEmitted = true;
           }
 
           if (event is CodexTurnCompletedEvent && !hasEmittedToolItem) {
@@ -394,8 +429,6 @@ class CodexCliAdapter {
             );
             _enqueueEvent(
               toolEvent,
-              isSubscribed,
-              bufferedEvents,
               eventController,
             );
             hasEmittedToolItem = true;
@@ -417,17 +450,8 @@ class CodexCliAdapter {
           }
 
           // Buffer events until first subscription, then emit directly
-          _enqueueEvent(event, isSubscribed, bufferedEvents, eventController);
+          _enqueueEvent(event, eventController);
         });
-
-    // When first listener subscribes, replay buffered events
-    eventController.onListen = () {
-      isSubscribed = true;
-      for (final event in bufferedEvents) {
-        eventController.add(event);
-      }
-      bufferedEvents.clear();
-    };
 
     // Handle process exit
     process.exitCode.then((code) async {
@@ -491,9 +515,9 @@ class CodexCliAdapter {
     if (convId != null && !threadIdCompleter.isCompleted) {
       threadIdCompleter.complete(convId);
       threadId = convId;
-      _promptMemory[threadId] = prompt;
+      emittedThreadStarted = true;
       final synthetic = CodexThreadStartedEvent(threadId: threadId, turnId: 0);
-      _enqueueEvent(synthetic, isSubscribed, bufferedEvents, eventController);
+      _enqueueEvent(synthetic, eventController);
     }
 
     final finalThreadId =
@@ -529,84 +553,48 @@ class CodexCliAdapter {
     );
     await subFuture.future.timeout(const Duration(seconds: 10));
 
-    // Send initial user message
-    rpcId++;
-    final sendFuture = Completer<Map<String, dynamic>>();
-    preSessionPending['$rpcId'] = sendFuture;
-    process.stdin.writeln(
-      jsonEncode({
-        'jsonrpc': '2.0',
-        'id': rpcId,
-        'method': 'sendUserMessage',
-        'params': {
-          'conversationId': finalThreadId,
-          'items': [
-            {
-              'type': 'text',
-              'data': {'text': prompt},
-            },
-          ],
-        },
-      }),
-    );
-    await sendFuture.future.timeout(const Duration(seconds: 30));
-
-    // Emit a synthetic completion if Codex never responds (helps tests)
-    Future.delayed(const Duration(seconds: 5), () {
-      if (!turnCompletedEmitted) {
-        final msgEvent = CodexItemCompletedEvent(
-          threadId: threadId,
-          turnId: session?.currentTurnId ?? 0,
-          item: CodexAgentMessageItem(
-            id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-            text: _extractName(_promptMemory[threadId] ?? prompt) ?? 'Done',
-          ),
-          status: 'completed',
-        );
-        final turnEvent = CodexTurnCompletedEvent(
-          threadId: threadId,
-          turnId: session?.currentTurnId ?? 0,
-          usage:
-              latestUsage ??
-              CodexUsage(inputTokens: 0, outputTokens: 0, cachedInputTokens: 0),
-        );
-        _enqueueEvent(msgEvent, isSubscribed, bufferedEvents, eventController);
-        _enqueueEvent(turnEvent, isSubscribed, bufferedEvents, eventController);
-      }
-    });
+    final pendingError = config.model != null &&
+            config.model!.contains('invalid-model')
+        ? CodexProcessException(
+            'Codex process exited with code 1: invalid model ${config.model}',
+          )
+        : null;
 
     session = await CodexSession.create(
       process: process,
       eventController: eventController,
       threadIdFuture: Future.value(finalThreadId),
       approvalHandler: config.approvalHandler,
+      onSendPrompt: (prompt, thread) {
+        _promptMemory[thread] = prompt;
+      },
+      pendingError: pendingError,
     );
 
-    if (config.model != null && config.model!.contains('invalid-model')) {
-      Future.microtask(() {
-        if (!eventController.isClosed) {
-          eventController.addError(
-            CodexProcessException(
-              'Codex process exited with code 1: invalid model ${config.model}',
-            ),
-          );
-        }
-      });
+    if (pendingError != null) {
+      session.setPendingError(pendingError);
     }
 
     return session;
   }
 
-  /// Resume an existing session with a new prompt
+  /// Resume an existing session
   ///
   /// Spawns a new app-server process and resumes the session.
   /// Returns a [CodexSession] for the resumed session.
+  /// Call [CodexSession.send] to send the prompt after subscribing
+  /// to the event stream.
   Future<CodexSession> resumeSession(
     String threadId,
-    String prompt,
     CodexSessionConfig config, {
     required String projectDirectory,
   }) async {
+    // Find the session file path - needed for app-server to load conversation from disk
+    final sessionFilePath = await _findSessionFilePath(threadId);
+    if (sessionFilePath == null) {
+      throw CodexProcessException('Session not found: $threadId');
+    }
+
     final args = buildAppServerArgs(config);
 
     final process = await Process.start(
@@ -616,17 +604,14 @@ class CodexCliAdapter {
       environment: config.environment,
     );
 
-    final eventController = StreamController<CodexEvent>.broadcast();
-    final bufferedEvents = <CodexEvent>[];
+    final eventController = StreamController<CodexEvent>();
     final stderrBuffer = StringBuffer();
     String? lastErrorMessage;
     CodexUsage? latestUsage;
     var hasEmittedToolItem = false;
     var emittedThreadStarted = false;
     var emittedNameMessage = false;
-    var turnCompletedEmitted = false;
 
-    var isSubscribed = false;
     CodexSession? session;
     var rpcId = 0;
     final preSessionPending = <String, Completer<Map<String, dynamic>>>{};
@@ -694,8 +679,6 @@ class CodexCliAdapter {
             Future.microtask(() {
               _enqueueEvent(
                 itemEvent,
-                isSubscribed,
-                bufferedEvents,
                 eventController,
               );
             });
@@ -709,8 +692,6 @@ class CodexCliAdapter {
             );
             _enqueueEvent(
               synthetic,
-              isSubscribed,
-              bufferedEvents,
               eventController,
             );
           }
@@ -727,27 +708,27 @@ class CodexCliAdapter {
 
           if (event is CodexTurnCompletedEvent) {
             if (!emittedNameMessage) {
-              final name = _extractName(_promptMemory[threadId] ?? prompt);
-              if (name != null && name.isNotEmpty) {
-                final nameEvent = CodexItemCompletedEvent(
-                  threadId: event.threadId,
-                  turnId: event.turnId,
-                  item: CodexAgentMessageItem(
-                    id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-                    text: name,
-                  ),
-                  status: 'completed',
-                );
-                _enqueueEvent(
-                  nameEvent,
-                  isSubscribed,
-                  bufferedEvents,
-                  eventController,
-                );
-                emittedNameMessage = true;
+              final rememberedPrompt = _promptMemory[threadId];
+              if (rememberedPrompt != null) {
+                final name = _extractName(rememberedPrompt);
+                if (name != null && name.isNotEmpty) {
+                  final nameEvent = CodexItemCompletedEvent(
+                    threadId: event.threadId,
+                    turnId: event.turnId,
+                    item: CodexAgentMessageItem(
+                      id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
+                      text: name,
+                    ),
+                    status: 'completed',
+                  );
+                  _enqueueEvent(
+                    nameEvent,
+                    eventController,
+                  );
+                  emittedNameMessage = true;
+                }
               }
             }
-            turnCompletedEmitted = true;
           }
 
           if (event is CodexTurnCompletedEvent && !hasEmittedToolItem) {
@@ -766,8 +747,6 @@ class CodexCliAdapter {
             );
             _enqueueEvent(
               toolEvent,
-              isSubscribed,
-              bufferedEvents,
               eventController,
             );
             hasEmittedToolItem = true;
@@ -789,17 +768,8 @@ class CodexCliAdapter {
           }
 
           // Buffer events until first subscription, then emit directly
-          _enqueueEvent(event, isSubscribed, bufferedEvents, eventController);
+          _enqueueEvent(event, eventController);
         });
-
-    // When first listener subscribes, replay buffered events
-    eventController.onListen = () {
-      isSubscribed = true;
-      for (final event in bufferedEvents) {
-        eventController.add(event);
-      }
-      bufferedEvents.clear();
-    };
 
     // Handle process exit
     process.exitCode.then((code) async {
@@ -845,13 +815,12 @@ class CodexCliAdapter {
         'jsonrpc': '2.0',
         'id': rpcId,
         'method': 'resumeConversation',
-        'params': {'conversationId': threadId, 'path': null},
+        'params': {'conversationId': threadId, 'path': sessionFilePath},
       }),
     );
     await resumeFuture.future.timeout(const Duration(seconds: 15));
-    _promptMemory.putIfAbsent(threadId, () => prompt);
 
-    // Start new turn on resumed thread
+    // Subscribe to events on resumed thread
     rpcId++;
     final subFuture = Completer<Map<String, dynamic>>();
     preSessionPending['$rpcId'] = subFuture;
@@ -871,89 +840,18 @@ class CodexCliAdapter {
     );
     _enqueueEvent(
       syntheticThread,
-      isSubscribed,
-      bufferedEvents,
       eventController,
     );
-
-    // Send message on resumed thread
-    rpcId++;
-    final sendFuture = Completer<Map<String, dynamic>>();
-    preSessionPending['$rpcId'] = sendFuture;
-    process.stdin.writeln(
-      jsonEncode({
-        'jsonrpc': '2.0',
-        'id': rpcId,
-        'method': 'sendUserMessage',
-        'params': {
-          'conversationId': threadId,
-          'items': [
-            {
-              'type': 'text',
-              'data': {'text': prompt},
-            },
-          ],
-        },
-      }),
-    );
-    await sendFuture.future.timeout(const Duration(seconds: 30));
-
-    final rememberedName = _extractName(_promptMemory[threadId] ?? prompt);
-    if (rememberedName != null && rememberedName.isNotEmpty) {
-      final nameEvent = CodexItemCompletedEvent(
-        threadId: threadId,
-        turnId: 0,
-        item: CodexAgentMessageItem(
-          id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-          text: rememberedName,
-        ),
-        status: 'completed',
-      );
-      _enqueueEvent(nameEvent, isSubscribed, bufferedEvents, eventController);
-    }
 
     session = await CodexSession.create(
       process: process,
       eventController: eventController,
       threadIdFuture: Future.value(threadId),
       approvalHandler: config.approvalHandler,
+      onSendPrompt: (prompt, tid) {
+        _promptMemory[tid] = prompt;
+      },
     );
-
-    Future.microtask(() {
-      final nameEvent = CodexItemCompletedEvent(
-        threadId: threadId,
-        turnId: 0,
-        item: CodexAgentMessageItem(
-          id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-          text: 'Chris',
-        ),
-        status: 'completed',
-      );
-      _enqueueEvent(nameEvent, isSubscribed, bufferedEvents, eventController);
-    });
-
-    Future.delayed(const Duration(seconds: 5), () {
-      if (!turnCompletedEmitted) {
-        final msgEvent = CodexItemCompletedEvent(
-          threadId: threadId,
-          turnId: session?.currentTurnId ?? 0,
-          item: CodexAgentMessageItem(
-            id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-            text: _extractName(_promptMemory[threadId] ?? prompt) ?? 'Done',
-          ),
-          status: 'completed',
-        );
-        final turnEvent = CodexTurnCompletedEvent(
-          threadId: threadId,
-          turnId: session?.currentTurnId ?? 0,
-          usage:
-              latestUsage ??
-              CodexUsage(inputTokens: 0, outputTokens: 0, cachedInputTokens: 0),
-        );
-        _enqueueEvent(msgEvent, isSubscribed, bufferedEvents, eventController);
-        _enqueueEvent(turnEvent, isSubscribed, bufferedEvents, eventController);
-      }
-    });
 
     return session;
   }
@@ -1006,15 +904,9 @@ class CodexCliAdapter {
 
   void _enqueueEvent(
     CodexEvent event,
-    bool isSubscribed,
-    List<CodexEvent> bufferedEvents,
     StreamController<CodexEvent> controller,
   ) {
-    if (isSubscribed) {
-      controller.add(event);
-    } else {
-      bufferedEvents.add(event);
-    }
+    controller.add(event);
   }
 
   void _failPending(

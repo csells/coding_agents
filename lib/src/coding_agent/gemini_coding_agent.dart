@@ -132,21 +132,22 @@ class _GeminiCodingAgentSession implements CodingAgentSession {
 
     if (_sessionId == null) {
       // First turn - create new session
-      underlyingSession = await _adapter.createSession(
-        prompt,
+      underlyingSession = _adapter.createSession(
         _config,
         projectDirectory: _projectDirectory,
       );
-      _sessionId = underlyingSession.sessionId;
     } else {
       // Subsequent turn - resume session
-      underlyingSession = await _adapter.resumeSession(
+      underlyingSession = _adapter.resumeSession(
         _sessionId!,
-        prompt,
         _config,
         projectDirectory: _projectDirectory,
       );
     }
+
+    // Send the prompt - this spawns the process and sets sessionId
+    await underlyingSession.send(prompt);
+    _sessionId ??= underlyingSession.sessionId;
 
     _currentUnderlyingSession = underlyingSession;
 

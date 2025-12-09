@@ -40,7 +40,7 @@ but use different architectural patterns:
 | CLI             | Process Model                         | Session Persistence | Multi-Turn Pattern                             | Session Storage                  |
 | --------------- | ------------------------------------- | ------------------- | ---------------------------------------------- | -------------------------------- |
 | **Claude Code** | Long-lived (bidirectional JSONL)      | Disk                | Send messages to same process via stdin        | `~/.claude/sessions/`            |
-| **Codex CLI**   | Long-lived app-server (JSON-RPC/JSONL)| Disk                | JSON-RPC createTurn to same process            | `~/.codex/sessions/`             |
+| **Codex CLI**   | App-server JSON-RPC (v2 thread/turn/items); CLI usually exits after each turn | Disk | JSON-RPC turn/start per process; threads can be resumed | `~/.codex/sessions/`             |
 | **Gemini CLI**  | Process-per-turn                      | Disk                | Spawn new process with `--resume <session_id>` | `~/.gemini/tmp/<project>/chats/` |
 
 **Key insight:** Claude Code and Codex app-server both support **long-lived
@@ -702,9 +702,10 @@ query.accountInfo();                  // Get authenticated account info
 
 Codex CLI supports two execution modes:
 
-1. **App-Server Mode** (recommended): Long-lived JSON-RPC process with
-   bidirectional communication, interactive approval handling, and multi-turn
-   within a single process.
+1. **App-Server Mode (v2 JSON-RPC, default since 0.44.x):** JSON-RPC over
+   stdio using `thread/start`, `turn/start`, and `item/*` notifications.
+   Approvals arrive as JSON-RPC requests. The protocol is single-process
+   capable; the shipping CLI typically runs one turn then exits.
 
 2. **Exec Mode** (legacy): Process-per-turn with JSONL streaming output,
    auto-approval only.
@@ -712,22 +713,20 @@ Codex CLI supports two execution modes:
 ### 4.2 App-Server Mode (Recommended)
 
 The app-server provides a JSON-RPC interface over stdio for IDE integration and
-programmatic access. **There are two protocols in use:**
+programmatic access.
 
-- **Shipping app-server protocol (CLI 0.44.0):** `initialize` →
-  `newConversation`/`resumeConversation` → `addConversationListener` →
-  `sendUserMessage`. Notifications arrive as `codex/event/*` when
-  `experimentalRawEvents` is `false` (task_started, agent_reasoning_delta,
-  agent_message_delta, agent_message, token_count, task_complete, etc.).
-- **Planned v2 (not accepted by CLI 0.44.0):** `thread/start`, `thread/resume`,
-  `turn/start`, `turn/interrupt`, with notifications such as `thread/started`,
-  `turn/started`, `turn/completed`, `item/agentMessage/delta`, etc. Approvals
-  arrive as JSON-RPC requests (`item/commandExecution/requestApproval`,
-  `item/fileChange/requestApproval`).
-
-Older stdio RPCs like `createThread`/`resumeThread`/`createTurn` belong to the
-non-app-server JSONL flow and remain only for backward compatibility when
-parsing archived session logs.
+- **Current v2 protocol (CLI ≥ 0.44.x):** `initialize` → `thread/start` /
+  `thread/resume` → `turn/start` → streaming notifications (`thread/started`,
+  `turn/started`, `item/agentMessage/delta`, `item/reasoning/textDelta`,
+  `item/started`, `item/completed`, `turn/completed`). Approval requests arrive
+  as JSON-RPC calls such as `item/commandExecution/requestApproval` and
+  `item/fileChange/requestApproval`. Token usage may still surface as
+  `codex/event/token_count` notifications for compatibility.
+- **Legacy v1 RPCs:** `newConversation` / `resumeConversation` /
+  `addConversationListener` / `sendUserMessage` (and the even older
+  `createThread` / `resumeThread` / `createTurn`) belong to the earlier JSONL
+  flow. They remain useful when parsing archived session logs but are not used
+  by the v2 adapter.
 
 **Starting the app-server:**
 ```bash
@@ -746,35 +745,7 @@ codex app-server [options]
 | `--search`                                 |       | Enable web search                 |
 | `-c <key=value>`                           |       | Config overrides                  |
 
-#### Current app-server methods (CLI 0.44.0)
-
-| Method                   | Description                       | Parameters (camelCase)                     |
-| ------------------------ | --------------------------------- | ------------------------------------------ |
-| `initialize`             | Identify client                   | `clientInfo { name, version }`             |
-| `newConversation`        | Create a new conversation         | `cwd?`, `model?`, config overrides         |
-| `resumeConversation`     | Resume an existing conversation   | `conversationId`, `path?`                  |
-| `addConversationListener` | Subscribe to events for a thread | `conversationId`, `experimentalRawEvents?` |
-| `sendUserMessage`        | Start a turn with user input      | `conversationId`, `items: [InputItem]`     |
-
-**Notifications (when `experimentalRawEvents=false`):**
-- `codex/event/task_started`
-- `codex/event/agent_reasoning_delta` / `agent_reasoning_section_break`
-- `codex/event/agent_message_delta`
-- `codex/event/agent_message`
-- `codex/event/token_count`
-- `codex/event/task_complete`
-
-**User input shape (current app-server):**
-```json
-{
-  "conversationId": "<id>",
-  "items": [
-    { "type": "text", "data": { "text": "hello" } }
-  ]
-}
-```
-
-#### Planned v2 JSON-RPC Methods (forward looking)
+#### Current JSON-RPC Methods (CLI ≥ 0.44.x)
 
 | Method            | Description                          | Parameters (camelCase)                                        |
 | ----------------- | ------------------------------------ | ------------------------------------------------------------- |
@@ -787,7 +758,11 @@ codex app-server [options]
 | `thread/archive`  | Archive a thread                     | `threadId`                                                    |
 | `review/start`    | Start a review                       | `threadId`, `target`, optional `delivery`                     |
 
-**Key v2 Notifications (method field):**
+**Adapter note:** The Dart Codex adapter uses this v2 surface by default,
+streaming `item/agentMessage/delta` as partial text, and still understands
+legacy `codex/event/*` and stored JSONL history when resuming old sessions.
+
+**Key Notifications (v2, method field):**
 - `thread/started` (params.thread.id)
 - `turn/started`
 - `turn/completed`

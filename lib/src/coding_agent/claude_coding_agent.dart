@@ -188,21 +188,23 @@ class _ClaudeCodingAgentSession implements CodingAgentSession {
 
     if (_sessionId == null) {
       // First turn - create new session
+      // Note: sessionId is empty until first prompt is sent and init event received
       underlyingSession = await _adapter.createSession(
-        prompt,
         _config,
         projectDirectory: _projectDirectory,
       );
-      _sessionId = underlyingSession.sessionId;
+      // Session ID will be populated from init event in _transformAndEmit
     } else {
       // Subsequent turn - resume session
       underlyingSession = await _adapter.resumeSession(
         _sessionId!,
-        prompt,
         _config,
         projectDirectory: _projectDirectory,
       );
     }
+
+    // Send the prompt after session is ready
+    await underlyingSession.send(prompt);
 
     _currentUnderlyingSession = underlyingSession;
 
@@ -227,6 +229,11 @@ class _ClaudeCodingAgentSession implements CodingAgentSession {
   }
 
   void _transformAndEmit(ClaudeEvent event, int turnId) {
+    // Capture session ID from init event
+    if (event is ClaudeSystemEvent && event.subtype == 'init') {
+      _sessionId = event.sessionId;
+    }
+
     final sid = _sessionId ?? event.sessionId;
 
     switch (event) {

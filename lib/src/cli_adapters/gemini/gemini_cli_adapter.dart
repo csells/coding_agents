@@ -8,15 +8,8 @@ import 'gemini_events.dart';
 import 'gemini_session.dart';
 import 'gemini_types.dart';
 
-/// Exception thrown when Gemini process encounters an error
-class GeminiProcessException implements Exception {
-  final String message;
-
-  GeminiProcessException(this.message);
-
-  @override
-  String toString() => 'GeminiProcessException: $message';
-}
+// Re-export GeminiProcessException from session for backwards compatibility
+export 'gemini_session.dart' show GeminiProcessException;
 
 /// Client for interacting with Gemini CLI
 class GeminiCliAdapter {
@@ -230,315 +223,39 @@ class GeminiCliAdapter {
     return digest.toString();
   }
 
-  /// Create a new Gemini session with the given prompt
+  /// Create a new Gemini session
   ///
-  /// Spawns a Gemini process for the initial turn.
   /// Returns a [GeminiSession] that provides access to the event stream.
-  Future<GeminiSession> createSession(
-    String prompt,
+  /// Call [GeminiSession.send] to send the first prompt after subscribing
+  /// to the event stream.
+  GeminiSession createSession(
     GeminiSessionConfig config, {
     required String projectDirectory,
-  }) async {
-    final args = buildInitialArgs(prompt, config);
+  }) {
     final turnId = _turnCounter++;
-
-    final process = await Process.start(
-      'gemini',
-      args,
-      workingDirectory: projectDirectory,
-    );
-    final eventController = StreamController<GeminiEvent>();
-    final bufferedEvents = <GeminiEvent>[];
-    final stderrBuffer = StringBuffer();
-
-    final sessionIdCompleter = Completer<String>();
-    var isSubscribed = false;
-    String sessionId = '';
-
-    // Capture stderr for error reporting
-    process.stderr.transform(utf8.decoder).listen((data) {
-      stderrBuffer.write(data);
-    });
-
-    // Parse stdout JSONL
-    process.stdout
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((line) {
-          final event = parseJsonLine(line, sessionId, turnId);
-          if (event == null) return;
-
-          // Capture session ID from init event
-          if (event is GeminiInitEvent) {
-            sessionId = event.sessionId;
-            if (!sessionIdCompleter.isCompleted) {
-              sessionIdCompleter.complete(event.sessionId);
-            }
-          }
-
-          // Check for API errors in result events and throw exception
-          if (event is GeminiResultEvent && event.status == 'error') {
-            final errorMsg =
-                event.error?['message'] as String? ??
-                'Gemini API error occurred';
-            eventController.addError(GeminiProcessException(errorMsg));
-            return;
-          }
-
-          // Buffer events until first subscription, then emit directly
-          if (isSubscribed) {
-            eventController.add(event);
-          } else {
-            bufferedEvents.add(event);
-          }
-        });
-
-    // When first listener subscribes, replay buffered events
-    eventController.onListen = () {
-      isSubscribed = true;
-      for (final event in bufferedEvents) {
-        eventController.add(event);
-      }
-      bufferedEvents.clear();
-    };
-
-    // Handle process exit
-    process.exitCode.then((code) async {
-      if (code != 0) {
-        // Wait a moment for stderr to finish
-        await Future.delayed(const Duration(milliseconds: 100));
-        final stderr = stderrBuffer.toString().trim();
-        final message = stderr.isNotEmpty
-            ? 'Gemini process exited with code $code: $stderr'
-            : 'Gemini process exited with code $code';
-        final exception = GeminiProcessException(message);
-        // Complete session ID completer with error if not yet completed
-        if (!sessionIdCompleter.isCompleted) {
-          sessionIdCompleter.completeError(exception);
-        }
-        if (!eventController.isClosed) {
-          eventController.addError(exception);
-        }
-      }
-      if (!eventController.isClosed) {
-        eventController.close();
-      }
-    });
-
-    // Close stdin to signal no more input
-    await process.stdin.close();
-
-    // Wait for session ID from init event
-    final finalSessionId = await sessionIdCompleter.future;
-
-    final session = await GeminiSession.create(
-      eventController: eventController,
+    return GeminiSession.create(
+      config: config,
+      projectDirectory: projectDirectory,
       turnId: turnId,
-      sessionIdFuture: Future.value(finalSessionId),
     );
-
-    session.currentProcess = process;
-    return session;
   }
 
-  /// Resume an existing session with a new prompt
+  /// Resume an existing session
   ///
-  /// Spawns a new Gemini process with the --resume flag using the actual
-  /// session ID (UUID) from the original session's init event.
   /// Returns a [GeminiSession] for the resumed session.
-  Future<GeminiSession> resumeSession(
+  /// Call [GeminiSession.send] to send the prompt after subscribing
+  /// to the event stream.
+  GeminiSession resumeSession(
     String sessionId,
-    String prompt,
     GeminiSessionConfig config, {
     required String projectDirectory,
-  }) async {
-    final args = buildResumeArgs(sessionId, prompt, config);
+  }) {
     final turnId = _turnCounter++;
-
-    final process = await Process.start(
-      'gemini',
-      args,
-      workingDirectory: projectDirectory,
-    );
-    final eventController = StreamController<GeminiEvent>();
-    final bufferedEvents = <GeminiEvent>[];
-    final stderrBuffer = StringBuffer();
-
-    var isSubscribed = false;
-
-    // Capture stderr for error reporting
-    process.stderr.transform(utf8.decoder).listen((data) {
-      stderrBuffer.write(data);
-    });
-
-    // Parse stdout JSONL
-    process.stdout
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((line) {
-          final event = parseJsonLine(line, sessionId, turnId);
-          if (event == null) return;
-
-          // Check for API errors in result events and throw exception
-          if (event is GeminiResultEvent && event.status == 'error') {
-            final errorMsg =
-                event.error?['message'] as String? ??
-                'Gemini API error occurred';
-            eventController.addError(GeminiProcessException(errorMsg));
-            return;
-          }
-
-          // Buffer events until first subscription, then emit directly
-          if (isSubscribed) {
-            eventController.add(event);
-          } else {
-            bufferedEvents.add(event);
-          }
-        });
-
-    // When first listener subscribes, replay buffered events
-    eventController.onListen = () {
-      isSubscribed = true;
-      for (final event in bufferedEvents) {
-        eventController.add(event);
-      }
-      bufferedEvents.clear();
-    };
-
-    // Handle process exit
-    process.exitCode.then((code) async {
-      if (code != 0 && !eventController.isClosed) {
-        // Wait a moment for stderr to finish
-        await Future.delayed(const Duration(milliseconds: 100));
-        final stderr = stderrBuffer.toString().trim();
-        final message = stderr.isNotEmpty
-            ? 'Gemini process exited with code $code: $stderr'
-            : 'Gemini process exited with code $code';
-        eventController.addError(GeminiProcessException(message));
-      }
-      if (!eventController.isClosed) {
-        eventController.close();
-      }
-    });
-
-    // Close stdin to signal no more input
-    await process.stdin.close();
-
-    final session = await GeminiSession.create(
-      eventController: eventController,
+    return GeminiSession.createForResume(
+      sessionId: sessionId,
+      config: config,
+      projectDirectory: projectDirectory,
       turnId: turnId,
-      sessionIdFuture: Future.value(sessionId),
     );
-
-    session.currentProcess = process;
-    return session;
-  }
-
-  /// Builds command-line arguments for starting a new Gemini session
-  List<String> buildInitialArgs(String prompt, GeminiSessionConfig config) {
-    // Gemini CLI uses positional prompt argument, not -p
-    final args = <String>[prompt, '-o', 'stream-json'];
-
-    // Approval mode
-    switch (config.approvalMode) {
-      case GeminiApprovalMode.defaultMode:
-        // No additional flags
-        break;
-      case GeminiApprovalMode.autoEdit:
-        args.add('--auto-edit');
-        break;
-      case GeminiApprovalMode.yolo:
-        args.add('-y');
-        break;
-    }
-
-    // Sandbox
-    if (config.sandbox) {
-      args.add('--sandbox');
-      if (config.sandboxImage != null) {
-        args.addAll(['--sandbox-image', config.sandboxImage!]);
-      }
-    }
-
-    // Model
-    if (config.model != null) {
-      args.addAll(['--model', config.model!]);
-    }
-
-    // Debug
-    if (config.debug) {
-      args.add('--debug');
-    }
-
-    // Extra args (for testing or advanced use)
-    if (config.extraArgs != null) {
-      args.addAll(config.extraArgs!);
-    }
-
-    return args;
-  }
-
-  /// Builds command-line arguments for resuming a Gemini session
-  List<String> buildResumeArgs(
-    String sessionId,
-    String prompt,
-    GeminiSessionConfig config,
-  ) {
-    // Gemini resume uses -r with actual session UUID and -p for the prompt
-    final args = <String>['-p', prompt, '-o', 'stream-json', '-r', sessionId];
-
-    // Approval mode
-    switch (config.approvalMode) {
-      case GeminiApprovalMode.defaultMode:
-        // No additional flags
-        break;
-      case GeminiApprovalMode.autoEdit:
-        args.add('--auto-edit');
-        break;
-      case GeminiApprovalMode.yolo:
-        args.add('-y');
-        break;
-    }
-
-    // Sandbox
-    if (config.sandbox) {
-      args.add('--sandbox');
-      if (config.sandboxImage != null) {
-        args.addAll(['--sandbox-image', config.sandboxImage!]);
-      }
-    }
-
-    // Model
-    if (config.model != null) {
-      args.addAll(['--model', config.model!]);
-    }
-
-    // Debug
-    if (config.debug) {
-      args.add('--debug');
-    }
-
-    // Extra args (for testing or advanced use)
-    if (config.extraArgs != null) {
-      args.addAll(config.extraArgs!);
-    }
-
-    return args;
-  }
-
-  /// Parses a JSONL line into a Gemini event
-  ///
-  /// Returns null for empty lines or non-JSON lines.
-  /// Throws [FormatException] for malformed JSON that starts with '{'.
-  GeminiEvent? parseJsonLine(String line, String sessionId, int turnId) {
-    final trimmed = line.trim();
-    if (trimmed.isEmpty) return null;
-
-    // Non-JSON lines (comments, etc.)
-    if (!trimmed.startsWith('{')) return null;
-
-    // Parse JSON - let FormatException propagate for malformed JSON
-    final json = jsonDecode(trimmed) as Map<String, dynamic>;
-    return GeminiEvent.fromJson(json, sessionId, turnId);
   }
 }

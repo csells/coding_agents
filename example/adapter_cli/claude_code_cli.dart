@@ -53,12 +53,13 @@ Future<void> simpleSingleTurn(
   );
 
   final session = await client.createSession(
-    'What is 2 + 2? Reply with just the number.',
     config,
     projectDirectory: workDir,
   );
 
   print('Session ID: ${session.sessionId}');
+
+  await session.send('What is 2 + 2? Reply with just the number.');
 
   // Process events from the session
   await for (final event in session.events) {
@@ -97,13 +98,11 @@ Future<String> createAndCaptureSession(
 
   print('Creating session and establishing context...');
   final session = await client.createSession(
-    'Remember this code: XYZ123. Just say "OK, I will remember XYZ123".',
     config,
     projectDirectory: workDir,
   );
 
-  // Capture the session ID immediately - this is what you'd store
-  final sessionId = session.sessionId;
+  await session.send('Remember this code: XYZ123. Just say "OK, I will remember XYZ123".');
 
   await for (final event in session.events) {
     if (event is ClaudeAssistantEvent) {
@@ -116,8 +115,8 @@ Future<String> createAndCaptureSession(
     if (event is ClaudeResultEvent) break;
   }
 
-  // Return the session ID so it can be stored and used later
-  return sessionId;
+  // Session ID is available after init event is received
+  return session.sessionId!;
 }
 
 /// Resume a session using a previously stored session ID.
@@ -135,10 +134,11 @@ Future<void> resumeStoredSession(
   print('Resuming session with stored ID: $sessionId');
   final session = await client.resumeSession(
     sessionId,
-    'What code did I ask you to remember?',
     config,
     projectDirectory: workDir,
   );
+
+  await session.send('What code did I ask you to remember?');
 
   await for (final event in session.events) {
     if (event is ClaudeAssistantEvent) {
@@ -195,10 +195,11 @@ Future<void> cancelSessionExample(
   );
 
   final session = await client.createSession(
-    'Count from 1 to 100, one number per line.',
     config,
     projectDirectory: workDir,
   );
+
+  await session.send('Count from 1 to 100, one number per line.');
 
   var messageCount = 0;
   await for (final event in session.events) {

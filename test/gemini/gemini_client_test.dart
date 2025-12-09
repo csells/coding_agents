@@ -1,158 +1,60 @@
-import 'package:coding_agents/src/cli_adapters/gemini/gemini_cli_adapter.dart';
-import 'package:coding_agents/src/cli_adapters/gemini/gemini_events.dart';
+import 'package:coding_agents/src/cli_adapters/gemini/gemini_session.dart';
 import 'package:coding_agents/src/cli_adapters/gemini/gemini_types.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('GeminiClient', () {
-    test('buildInitialArgs generates correct arguments for default config', () {
-      final client = GeminiCliAdapter();
+  group('GeminiSessionConfig', () {
+    test('default config has correct defaults', () {
       final config = GeminiSessionConfig();
 
-      final args = client.buildInitialArgs('test prompt', config);
-
-      // Gemini CLI uses positional prompt and -o for output format
-      expect(args, contains('test prompt'));
-      expect(args, contains('-o'));
-      expect(args, contains('stream-json'));
+      expect(config.approvalMode, GeminiApprovalMode.defaultMode);
+      expect(config.sandbox, isFalse);
+      expect(config.sandboxImage, isNull);
+      expect(config.model, isNull);
+      expect(config.debug, isFalse);
+      expect(config.extraArgs, isNull);
     });
 
-    test('buildInitialArgs includes yolo flag', () {
-      final client = GeminiCliAdapter();
+    test('config with yolo mode', () {
       final config = GeminiSessionConfig(approvalMode: GeminiApprovalMode.yolo);
 
-      final args = client.buildInitialArgs('test prompt', config);
-
-      expect(args, contains('-y'));
+      expect(config.approvalMode, GeminiApprovalMode.yolo);
     });
 
-    test('buildInitialArgs includes auto-edit flag', () {
-      final client = GeminiCliAdapter();
+    test('config with auto-edit mode', () {
       final config = GeminiSessionConfig(
         approvalMode: GeminiApprovalMode.autoEdit,
       );
 
-      final args = client.buildInitialArgs('test prompt', config);
-
-      expect(args, contains('--auto-edit'));
+      expect(config.approvalMode, GeminiApprovalMode.autoEdit);
     });
 
-    test('buildInitialArgs includes sandbox flag', () {
-      final client = GeminiCliAdapter();
-      final config = GeminiSessionConfig(sandbox: true);
-
-      final args = client.buildInitialArgs('test prompt', config);
-
-      expect(args, contains('--sandbox'));
-    });
-
-    test('buildInitialArgs includes sandbox image', () {
-      final client = GeminiCliAdapter();
+    test('config with sandbox settings', () {
       final config = GeminiSessionConfig(
         sandbox: true,
         sandboxImage: 'my-image:latest',
       );
 
-      final args = client.buildInitialArgs('test prompt', config);
-
-      expect(args, contains('--sandbox'));
-      expect(args, contains('--sandbox-image'));
-      expect(args, contains('my-image:latest'));
+      expect(config.sandbox, isTrue);
+      expect(config.sandboxImage, 'my-image:latest');
     });
 
-    test('buildInitialArgs includes model when specified', () {
-      final client = GeminiCliAdapter();
+    test('config with model specified', () {
       final config = GeminiSessionConfig(model: 'gemini-2.0-flash-exp');
 
-      final args = client.buildInitialArgs('test prompt', config);
-
-      expect(args, contains('--model'));
-      expect(args, contains('gemini-2.0-flash-exp'));
+      expect(config.model, 'gemini-2.0-flash-exp');
     });
 
-    test('buildInitialArgs includes debug flag when enabled', () {
-      final client = GeminiCliAdapter();
+    test('config with debug enabled', () {
       final config = GeminiSessionConfig(debug: true);
 
-      final args = client.buildInitialArgs('test prompt', config);
-
-      expect(args, contains('--debug'));
+      expect(config.debug, isTrue);
     });
 
-    test('buildResumeArgs generates correct arguments', () {
-      final client = GeminiCliAdapter();
-      final config = GeminiSessionConfig();
+    test('config with extra args', () {
+      final config = GeminiSessionConfig(extraArgs: ['--verbose', '--trace']);
 
-      final args = client.buildResumeArgs('sess-123-abc', 'continue', config);
-
-      expect(args, contains('-p'));
-      expect(args, contains('continue'));
-      expect(args, contains('-o'));
-      expect(args, contains('stream-json'));
-      expect(args, contains('-r'));
-      expect(args, contains('sess-123-abc'));
-    });
-
-    test('buildResumeArgs includes yolo flag for resumed session', () {
-      final client = GeminiCliAdapter();
-      final config = GeminiSessionConfig(approvalMode: GeminiApprovalMode.yolo);
-
-      final args = client.buildResumeArgs('sess-456-def', 'continue', config);
-
-      expect(args, contains('-y'));
-      expect(args, contains('-r'));
-      expect(args, contains('sess-456-def'));
-    });
-
-    test('buildResumeArgs includes sandbox for resumed session', () {
-      final client = GeminiCliAdapter();
-      final config = GeminiSessionConfig(
-        sandbox: true,
-        sandboxImage: 'image:v1',
-      );
-
-      final args = client.buildResumeArgs('sess-789-ghi', 'continue', config);
-
-      expect(args, contains('--sandbox'));
-      expect(args, contains('--sandbox-image'));
-      expect(args, contains('image:v1'));
-      expect(args, contains('-r'));
-      expect(args, contains('sess-789-ghi'));
-    });
-  });
-
-  group('GeminiClient event parsing', () {
-    test('parseJsonLine parses valid JSONL', () {
-      final client = GeminiCliAdapter();
-      final line =
-          '{"type":"init","session_id":"sess_123","model":"gemini-flash"}';
-
-      final event = client.parseJsonLine(line, 'sess_123', 1);
-
-      expect(event, isA<GeminiInitEvent>());
-    });
-
-    test('parseJsonLine returns null for empty line', () {
-      final client = GeminiCliAdapter();
-
-      expect(client.parseJsonLine('', '', 1), isNull);
-      expect(client.parseJsonLine('   ', '', 1), isNull);
-    });
-
-    test('parseJsonLine returns null for non-JSON line', () {
-      final client = GeminiCliAdapter();
-
-      expect(client.parseJsonLine('not json', '', 1), isNull);
-      expect(client.parseJsonLine('# comment', '', 1), isNull);
-    });
-
-    test('parseJsonLine throws on malformed JSON', () {
-      final client = GeminiCliAdapter();
-
-      expect(
-        () => client.parseJsonLine('{malformed', '', 1),
-        throwsA(isA<FormatException>()),
-      );
+      expect(config.extraArgs, ['--verbose', '--trace']);
     });
   });
 

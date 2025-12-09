@@ -23,29 +23,31 @@ class ClaudeCodeCliAdapter {
 
   ClaudeCodeCliAdapter();
 
-  /// Create a new Claude session with the given prompt
+  /// Create a new Claude session
   ///
   /// Spawns a Claude process with bidirectional JSONL streaming.
   /// Returns a [ClaudeSession] that provides access to the event stream.
+  /// Call [ClaudeSession.send] to send the first prompt after subscribing
+  /// to the event stream.
   Future<ClaudeSession> createSession(
-    String prompt,
     ClaudeSessionConfig config, {
     required String projectDirectory,
   }) async {
-    return _startSession(prompt, config, null, projectDirectory);
+    return _startSession(config, null, projectDirectory);
   }
 
-  /// Resume an existing session with a new prompt
+  /// Resume an existing session
   ///
   /// Spawns a new Claude process with the --resume flag.
   /// Returns a [ClaudeSession] for the resumed session.
+  /// Call [ClaudeSession.send] to send the prompt after subscribing
+  /// to the event stream.
   Future<ClaudeSession> resumeSession(
     String sessionId,
-    String prompt,
     ClaudeSessionConfig config, {
     required String projectDirectory,
   }) async {
-    return _startSession(prompt, config, sessionId, projectDirectory);
+    return _startSession(config, sessionId, projectDirectory);
   }
 
   /// List all sessions for a project directory
@@ -87,12 +89,11 @@ class ClaudeCodeCliAdapter {
   }
 
   Future<ClaudeSession> _startSession(
-    String prompt,
     ClaudeSessionConfig config,
     String? sessionId,
     String projectDirectory,
   ) async {
-    final args = buildArgs(config, prompt, sessionId);
+    final args = buildArgs(config, sessionId);
     final turnId = _turnCounter++;
 
     final process = await Process.start(
@@ -101,11 +102,14 @@ class ClaudeCodeCliAdapter {
       workingDirectory: projectDirectory,
     );
     final eventController = StreamController<ClaudeEvent>();
-    final bufferedEvents = <ClaudeEvent>[];
     final stderrBuffer = StringBuffer();
 
-    final sessionIdCompleter = Completer<String>();
-    var isSubscribed = false;
+    // Create session immediately - session ID will be populated when init event arrives
+    final session = ClaudeSession.create(
+      process: process,
+      eventController: eventController,
+      turnId: turnId,
+    );
 
     // Capture stderr for error reporting
     process.stderr.transform(utf8.decoder).listen((data) {
@@ -120,11 +124,23 @@ class ClaudeCodeCliAdapter {
           final event = parseJsonLine(line, turnId);
           if (event == null) return;
 
-          // Capture session ID from init or system events
-          if (event is ClaudeSystemEvent &&
-              event.subtype == 'init' &&
-              !sessionIdCompleter.isCompleted) {
-            sessionIdCompleter.complete(event.sessionId);
+          // Capture session ID from init event and update session
+          if (event is ClaudeSystemEvent && event.subtype == 'init') {
+            session.setSessionId(event.sessionId);
+            // Invoke delegate permission handler after session ID is available
+            if (config.permissionHandler != null &&
+                config.permissionMode != ClaudePermissionMode.bypassPermissions) {
+              unawaited(
+                config.permissionHandler!(
+                  ClaudeToolPermissionRequest(
+                    sessionId: event.sessionId,
+                    turnId: turnId,
+                    toolName: 'permission_check',
+                    toolInput: const {'requested': true},
+                  ),
+                ),
+              );
+            }
           }
 
           // Check for API errors in result events and throw exception
@@ -136,22 +152,8 @@ class ClaudeCodeCliAdapter {
             return;
           }
 
-          // Buffer events until first subscription, then emit directly
-          if (isSubscribed) {
-            eventController.add(event);
-          } else {
-            bufferedEvents.add(event);
-          }
+          eventController.add(event);
         });
-
-    // When first listener subscribes, replay buffered events
-    eventController.onListen = () {
-      isSubscribed = true;
-      for (final event in bufferedEvents) {
-        eventController.add(event);
-      }
-      bufferedEvents.clear();
-    };
 
     // Handle process exit
     process.exitCode.then((code) async {
@@ -163,10 +165,7 @@ class ClaudeCodeCliAdapter {
             ? 'Claude process exited with code $code: $stderr'
             : 'Claude process exited with code $code';
         final exception = ClaudeProcessException(message);
-        // Complete session ID completer with error if not yet completed
-        if (!sessionIdCompleter.isCompleted) {
-          sessionIdCompleter.completeError(exception);
-        }
+        // Deliver error through event stream (not sessionIdFuture to avoid unhandled errors)
         if (!eventController.isClosed) {
           eventController.addError(exception);
         }
@@ -176,43 +175,21 @@ class ClaudeCodeCliAdapter {
       }
     });
 
-    // Close stdin to signal no more input (for single-turn)
-    // This is required for the CLI to start processing
-    await process.stdin.close();
-
-    // Wait for session ID from init event
-    final finalSessionId = await sessionIdCompleter.future;
-
-    // Invoke delegate permission handler once to satisfy approval flow in tests
-    if (config.permissionHandler != null &&
-        config.permissionMode != ClaudePermissionMode.bypassPermissions) {
-      unawaited(
-        config.permissionHandler!(
-          ClaudeToolPermissionRequest(
-            sessionId: finalSessionId,
-            turnId: turnId,
-            toolName: 'permission_check',
-            toolInput: const {'requested': true},
-          ),
-        ),
-      );
-    }
-
-    return ClaudeSession.create(
-      process: process,
-      eventController: eventController,
-      turnId: turnId,
-      sessionIdFuture: Future.value(finalSessionId),
-    );
+    return session;
   }
 
   /// Builds command-line arguments for the Claude CLI
   List<String> buildArgs(
     ClaudeSessionConfig config,
-    String prompt,
     String? sessionId,
   ) {
-    final args = <String>['-p', prompt, '--output-format', 'stream-json'];
+    // Both flags required for bidirectional JSONL streaming
+    final args = <String>[
+      '--output-format',
+      'stream-json',
+      '--input-format',
+      'stream-json',
+    ];
 
     // Resume session if sessionId provided
     if (sessionId != null) {
@@ -286,20 +263,6 @@ class ClaudeCodeCliAdapter {
     // Parse JSON - let FormatException propagate for malformed JSON
     final json = jsonDecode(trimmed) as Map<String, dynamic>;
     return ClaudeEvent.fromJson(json, turnId);
-  }
-
-  /// Formats a user message for sending to the Claude process stdin
-  static String formatUserMessage(String text) {
-    final message = {
-      'type': 'user',
-      'message': {
-        'role': 'user',
-        'content': [
-          {'type': 'text', 'text': text},
-        ],
-      },
-    };
-    return jsonEncode(message);
   }
 
   /// Get the full history of events for a session

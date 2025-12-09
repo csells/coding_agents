@@ -20,19 +20,26 @@ class CodexSession {
   final StreamController<CodexEvent> _eventController;
   final Process _process;
   final CodexApprovalHandler? _approvalHandler;
+  final void Function(String prompt, String threadId)? _onSendPrompt;
 
   int _currentTurnId = 0;
   int _rpcId = 0;
   final Map<int, Completer<Map<String, dynamic>>> _pendingRequests = {};
+  bool _sentFirstMessage = false;
+  Exception? _pendingError;
 
   CodexSession._({
     required this.threadId,
     required StreamController<CodexEvent> eventController,
     required Process process,
     CodexApprovalHandler? approvalHandler,
+    void Function(String prompt, String threadId)? onSendPrompt,
+    Exception? pendingError,
   })  : _eventController = eventController,
         _process = process,
-        _approvalHandler = approvalHandler;
+        _approvalHandler = approvalHandler,
+        _onSendPrompt = onSendPrompt,
+        _pendingError = pendingError;
 
   /// Create a new session with an app-server process
   static Future<CodexSession> create({
@@ -40,6 +47,8 @@ class CodexSession {
     required StreamController<CodexEvent> eventController,
     required Future<String> threadIdFuture,
     CodexApprovalHandler? approvalHandler,
+    void Function(String prompt, String threadId)? onSendPrompt,
+    Exception? pendingError,
   }) async {
     final threadId = await threadIdFuture;
     final session = CodexSession._(
@@ -47,6 +56,8 @@ class CodexSession {
       eventController: eventController,
       process: process,
       approvalHandler: approvalHandler,
+      onSendPrompt: onSendPrompt,
+      pendingError: pendingError,
     );
     return session;
   }
@@ -57,11 +68,23 @@ class CodexSession {
   /// Increment the turn ID for a new turn
   void incrementTurnId() => _currentTurnId++;
 
-  /// Send a follow-up message to continue the conversation
+  /// Send a message to the session
   ///
-  /// Creates a new turn with the given prompt.
+  /// For the first call, sends the initial prompt. For subsequent calls,
+  /// increments the turn ID and sends a follow-up message.
   Future<void> send(String prompt) async {
-    incrementTurnId();
+    if (_pendingError != null) {
+      throw _pendingError!;
+    }
+
+    // Increment turn ID for follow-up messages (not for the first message)
+    if (_sentFirstMessage) {
+      incrementTurnId();
+    }
+    _sentFirstMessage = true;
+
+    _onSendPrompt?.call(prompt, threadId);
+
     final request = _buildRpcRequest('sendUserMessage', {
       'conversationId': threadId,
       'items': [
@@ -91,12 +114,14 @@ class CodexSession {
 
   /// Cancel the current operation and close the session
   Future<void> cancel() async {
-    // Send interrupt request if possible
+    // Send interrupt request if process stdin is still open
     final request = _buildRpcRequest('interrupt', {'thread_id': threadId});
     try {
       _writeToStdin(request);
-    } catch (_) {
-      // Process may already be closed
+    } on StateError {
+      // Stdin already closed - process shutting down, continue with kill
+    } on IOException {
+      // I/O error writing to stdin - process likely dead, continue with kill
     }
 
     _process.kill(ProcessSignal.sigterm);
@@ -154,6 +179,13 @@ class CodexSession {
     if (_approvalHandler != null) {
       final response = await _approvalHandler(request);
       await respondToApproval(request.id, response);
+    }
+  }
+
+  void setPendingError(Exception exception) {
+    _pendingError = exception;
+    if (!_eventController.isClosed) {
+      _eventController.addError(exception);
     }
   }
 

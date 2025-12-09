@@ -177,17 +177,17 @@ Future<void> _oneShot(
   );
 
   final session = sessionId != null
-      ? await client.resumeSession(
+      ? client.resumeSession(
           sessionId,
-          prompt,
           config,
           projectDirectory: projectDir,
         )
-      : await client.createSession(
-          prompt,
+      : client.createSession(
           config,
           projectDirectory: projectDir,
         );
+
+  await session.send(prompt);
 
   await for (final event in session.events) {
     switch (event) {
@@ -196,7 +196,7 @@ Future<void> _oneShot(
           stdout.write(event.content);
         }
       case GeminiToolUseEvent():
-        print('\n[Tool: ${event.toolUse.toolName}]');
+        print('\n[Tool: ${event.toolUse.toolName}(${_formatParams(event.toolUse.parameters)})]');
       case GeminiResultEvent():
         print('');
         break;
@@ -250,19 +250,19 @@ Future<void> _repl(
     );
 
     final session = currentSessionId != null
-        ? await client.resumeSession(
+        ? client.resumeSession(
             currentSessionId,
-            input,
             config,
             projectDirectory: projectDir,
           )
-        : await client.createSession(
-            input,
+        : client.createSession(
             config,
             projectDirectory: projectDir,
           );
 
     currentSessionId = session.sessionId;
+
+    await session.send(input);
 
     stdout.write('Gemini: ');
     await for (final event in session.events) {
@@ -272,7 +272,7 @@ Future<void> _repl(
             stdout.write(event.content);
           }
         case GeminiToolUseEvent():
-          print('\n[Tool: ${event.toolUse.toolName}]');
+          print('\n[Tool: ${event.toolUse.toolName}(${_formatParams(event.toolUse.parameters)})]');
         case GeminiResultEvent():
           print('');
           print('');

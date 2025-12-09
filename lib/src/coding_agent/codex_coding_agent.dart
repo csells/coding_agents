@@ -181,7 +181,6 @@ class _CodexCodingAgentSession implements CodingAgentSession {
     if (_sessionId == null) {
       // First turn - create new session
       underlyingSession = await _adapter.createSession(
-        prompt,
         _config,
         projectDirectory: _projectDirectory,
       );
@@ -190,11 +189,13 @@ class _CodexCodingAgentSession implements CodingAgentSession {
       // Subsequent turn - resume session
       underlyingSession = await _adapter.resumeSession(
         _sessionId!,
-        prompt,
         _config,
         projectDirectory: _projectDirectory,
       );
     }
+
+    // Send the prompt after session is ready
+    await underlyingSession.send(prompt);
 
     _currentUnderlyingSession = underlyingSession;
 

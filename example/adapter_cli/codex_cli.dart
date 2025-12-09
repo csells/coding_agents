@@ -190,15 +190,15 @@ Future<void> _oneShot(
   final session = threadId != null
       ? await client.resumeSession(
           threadId,
-          prompt,
           config,
           projectDirectory: projectDir,
         )
       : await client.createSession(
-          prompt,
           config,
           projectDirectory: projectDir,
         );
+
+  await session.send(prompt);
 
   var sawPartial = false;
   await for (final event in session.events) {
@@ -215,7 +215,7 @@ Future<void> _oneShot(
         if (item is CodexAgentMessageItem) {
           stdout.write(item.text);
         } else if (item is CodexToolCallItem) {
-          print('\n[Tool: ${item.name}]');
+          print('\n[Tool: ${item.name}(${_formatArgs(item.arguments)})]');
         }
       case CodexApprovalRequiredEvent():
         // This will be handled by the approvalHandler callback
@@ -248,18 +248,19 @@ Future<CodexApprovalResponse> _approvalHandler(
   if (request.filePath != null) {
     print('File: ${request.filePath}');
   }
-  print('');
-  stdout.write('Allow? [y/n/a(always)/d(never)]: ');
+  if (request.toolInput != null) {
+    print('Input: ${_formatArgs(request.toolInput!)}');
+  }
+  stdout.write('Yes/No/Always/neVer? [N]: ');
 
-  final input = stdin.readLineSync()?.trim().toLowerCase() ?? 'n';
+  final input = stdin.readLineSync()?.trim().toLowerCase() ?? '';
 
   return switch (input) {
-    'y' ||
-    'yes' => CodexApprovalResponse(decision: CodexApprovalDecision.allow),
+    'y' || 'yes' => CodexApprovalResponse(decision: CodexApprovalDecision.allow),
     'a' || 'always' => CodexApprovalResponse(
       decision: CodexApprovalDecision.allowAlways,
     ),
-    'd' || 'never' => CodexApprovalResponse(
+    'v' || 'never' => CodexApprovalResponse(
       decision: CodexApprovalDecision.denyAlways,
     ),
     _ => CodexApprovalResponse(decision: CodexApprovalDecision.deny),
@@ -311,24 +312,22 @@ Future<void> _repl(
 
     // If we have an active session, use send() for multi-turn
     // Otherwise create a new session
-    if (activeSession != null && currentThreadId != null) {
-      await activeSession.send(input);
-    } else {
+    if (activeSession == null || currentThreadId == null) {
       activeSession = currentThreadId != null
           ? await client.resumeSession(
               currentThreadId,
-              input,
               config,
               projectDirectory: projectDir,
             )
           : await client.createSession(
-              input,
               config,
               projectDirectory: projectDir,
             );
 
       currentThreadId = activeSession.threadId;
     }
+
+    await activeSession.send(input);
 
     stdout.write('Codex: ');
     var sawPartial = false;
@@ -346,7 +345,7 @@ Future<void> _repl(
           if (item is CodexAgentMessageItem) {
             stdout.write(item.text);
           } else if (item is CodexToolCallItem) {
-            print('\n[Tool: ${item.name}]');
+            print('\n[Tool: ${item.name}(${_formatArgs(item.arguments)})]');
           }
         case CodexApprovalRequiredEvent():
           print('\n[Approval request: ${event.request.description}]');
@@ -367,6 +366,13 @@ Future<void> _repl(
 String _truncate(String text, int maxLength) {
   if (text.length <= maxLength) return text;
   return '${text.substring(0, maxLength)}...';
+}
+
+String _formatArgs(Map<String, dynamic> args) {
+  final entries = args.entries
+      .take(3)
+      .map((e) => '${e.key}: ${_truncate(e.value.toString(), 30)}');
+  return entries.join(', ');
 }
 
 class _ParsedArgs {

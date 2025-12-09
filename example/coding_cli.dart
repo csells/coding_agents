@@ -43,6 +43,33 @@ Available commands:
 ''');
 }
 
+/// Approval handler callback for interactive tool approval prompts
+Future<ToolApprovalResponse> _approvalHandler(ToolApprovalRequest request) async {
+  print('');
+  print('=== Approval Required ===');
+  print('Tool: ${request.toolName}');
+  print('Description: ${request.description}');
+  if (request.command != null) {
+    print('Command: ${request.command}');
+  }
+  if (request.filePath != null) {
+    print('File: ${request.filePath}');
+  }
+  if (request.input != null) {
+    print('Input: ${_formatInput(request.input!)}');
+  }
+  stdout.write('Yes/No/Always/neVer? [N]: ');
+
+  final input = stdin.readLineSync()?.trim().toLowerCase() ?? '';
+
+  return switch (input) {
+    'y' || 'yes' => ToolApprovalResponse(decision: ToolApprovalDecision.allow),
+    'a' || 'always' => ToolApprovalResponse(decision: ToolApprovalDecision.allowAlways),
+    'v' || 'never' => ToolApprovalResponse(decision: ToolApprovalDecision.denyAlways),
+    _ => ToolApprovalResponse(decision: ToolApprovalDecision.deny),
+  };
+}
+
 Future<void> main(List<String> args) async {
   final parsed = _parseArgs(args);
 
@@ -67,21 +94,34 @@ Future<void> main(List<String> args) async {
         agentName,
         parsed.prompt!,
         projectDir,
+        yolo: parsed.yolo,
         sessionId: parsed.resumeSession,
       );
     } else {
       await _showHistory(agent, agentName, parsed.resumeSession!, projectDir);
-      await _repl(agent, agentName, projectDir, sessionId: parsed.resumeSession);
+      await _repl(
+        agent,
+        agentName,
+        projectDir,
+        yolo: parsed.yolo,
+        sessionId: parsed.resumeSession,
+      );
     }
     return;
   }
 
   if (parsed.prompt != null) {
-    await _oneShot(agent, agentName, parsed.prompt!, projectDir);
+    await _oneShot(
+      agent,
+      agentName,
+      parsed.prompt!,
+      projectDir,
+      yolo: parsed.yolo,
+    );
     return;
   }
 
-  await _repl(agent, agentName, projectDir);
+  await _repl(agent, agentName, projectDir, yolo: parsed.yolo);
 }
 
 CodingAgent _createAgent(String agentType, bool yolo) {
@@ -187,11 +227,20 @@ Future<void> _oneShot(
   String agentName,
   String prompt,
   String projectDir, {
+  required bool yolo,
   String? sessionId,
 }) async {
+  final handler = yolo ? null : _approvalHandler;
   final session = sessionId != null
-      ? await agent.resumeSession(sessionId, projectDirectory: projectDir)
-      : await agent.createSession(projectDirectory: projectDir);
+      ? await agent.resumeSession(
+          sessionId,
+          projectDirectory: projectDir,
+          approvalHandler: handler,
+        )
+      : await agent.createSession(
+          projectDirectory: projectDir,
+          approvalHandler: handler,
+        );
 
   // Subscribe to events before sending message
   final turnCompleted = Completer<void>();
@@ -210,7 +259,7 @@ Future<void> _oneShot(
           // Optionally show thinking
           break;
         case CodingAgentToolUseEvent():
-          print('\n[Tool: ${event.toolName}]');
+          print('\n[Tool: ${event.toolName}(${_formatInput(event.input)})]');
         case CodingAgentToolResultEvent():
           // Tool results are internal
           break;
@@ -245,19 +294,28 @@ Future<void> _repl(
   CodingAgent agent,
   String agentName,
   String projectDir, {
+  required bool yolo,
   String? sessionId,
 }) async {
   print('$agentName CLI');
   print('');
   _printReplHelp();
 
+  final handler = yolo ? null : _approvalHandler;
   CodingAgentSession? session;
 
   // Create or resume session
   if (sessionId != null) {
-    session = await agent.resumeSession(sessionId, projectDirectory: projectDir);
+    session = await agent.resumeSession(
+      sessionId,
+      projectDirectory: projectDir,
+      approvalHandler: handler,
+    );
   } else {
-    session = await agent.createSession(projectDirectory: projectDir);
+    session = await agent.createSession(
+      projectDirectory: projectDir,
+      approvalHandler: handler,
+    );
   }
 
   while (true) {
@@ -302,7 +360,7 @@ Future<void> _repl(
           // Optionally show thinking
           break;
         case CodingAgentToolUseEvent():
-          print('\n[Tool: ${event.toolName}]');
+          print('\n[Tool: ${event.toolName}(${_formatInput(event.input)})]');
         case CodingAgentToolResultEvent():
           // Tool results are internal
           break;
