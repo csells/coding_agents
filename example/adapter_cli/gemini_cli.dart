@@ -199,10 +199,12 @@ Future<void> _oneShot(
         print('\n[Tool: ${event.toolUse.toolName}(${_formatParams(event.toolUse.parameters)})]');
       case GeminiResultEvent():
         print('');
-        break;
+        await session.cancel();
+        return;
       case GeminiErrorEvent():
         print('Error: ${event.message}');
-        break;
+        await session.cancel();
+        return;
       default:
         break;
     }

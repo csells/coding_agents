@@ -218,7 +218,8 @@ Future<void> _oneShot(
         }
       case ClaudeResultEvent():
         print('');
-        break;
+        await session.cancel();
+        return;
       default:
         break;
     }
