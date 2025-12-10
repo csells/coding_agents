@@ -126,20 +126,14 @@ class ClaudeCodeCliAdapter {
           // Capture session ID from init event and update session
           if (event is ClaudeSystemEvent && event.subtype == 'init') {
             session.setSessionId(event.sessionId);
-            // Invoke delegate permission handler after session ID is available
-            if (config.permissionHandler != null &&
-                config.permissionMode != ClaudePermissionMode.bypassPermissions) {
-              unawaited(
-                config.permissionHandler!(
-                  ClaudeToolPermissionRequest(
-                    sessionId: event.sessionId,
-                    turnId: turnId,
-                    toolName: 'permission_check',
-                    toolInput: const {'requested': true},
-                  ),
-                ),
-              );
-            }
+          }
+
+          // Handle control_request events (permission prompts)
+          if (event is ClaudeControlRequestEvent) {
+            _handleControlRequest(session, event, config);
+            // Also emit the event so clients can see permission requests
+            eventController.add(event);
+            return;
           }
 
           // Check for API errors in result events and throw exception
@@ -207,8 +201,8 @@ class ClaudeCodeCliAdapter {
         args.add('--dangerously-skip-permissions');
         break;
       case ClaudePermissionMode.delegate:
-        // Use MCP tool for permission delegation
-        args.addAll(['--permission-prompt-tool', 'mcp__permissions__prompt']);
+        // Route permission prompts through stdio control channel
+        args.addAll(['--permission-prompt-tool', 'stdio']);
         break;
     }
 
@@ -307,6 +301,57 @@ class ClaudeCodeCliAdapter {
     }
 
     return events;
+  }
+
+  /// Handle a control_request event by calling the permission handler
+  /// and sending back a control_response
+  void _handleControlRequest(
+    ClaudeSession session,
+    ClaudeControlRequestEvent event,
+    ClaudeSessionConfig config,
+  ) {
+    // Only handle can_use_tool requests
+    if (event.subtype != 'can_use_tool') {
+      return;
+    }
+
+    final handler = config.permissionHandler;
+    if (handler == null) {
+      // No handler - deny the request
+      unawaited(
+        session.sendControlResponse(
+          event.requestId,
+          ClaudeControlResponse.deny(
+            message: 'No permission handler configured',
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Call the permission handler asynchronously
+    unawaited(
+      handler(
+        ClaudeToolPermissionRequest(
+          sessionId: session.sessionId ?? '',
+          turnId: event.turnId,
+          toolName: event.toolName ?? 'unknown',
+          toolInput: event.toolInput ?? const {},
+          toolUseId: event.toolUseId,
+          blockedPath: event.blockedPath,
+          decisionReason: event.decisionReason,
+        ),
+      ).then((response) {
+        final isAllowed = response.behavior == ClaudePermissionBehavior.allow ||
+            response.behavior == ClaudePermissionBehavior.allowAlways;
+        final controlResponse = isAllowed
+            ? ClaudeControlResponse.allow(updatedInput: response.updatedInput)
+            : ClaudeControlResponse.deny(
+                message: response.message ?? 'Denied by permission handler',
+              );
+        return session.sendControlResponse(event.requestId, controlResponse);
+      }),
+    );
   }
 
   Future<ClaudeSessionInfo?> _parseSessionFile(

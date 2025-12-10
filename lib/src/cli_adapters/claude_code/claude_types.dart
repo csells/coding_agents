@@ -50,11 +50,23 @@ class ClaudeToolPermissionRequest {
   final String sessionId;
   final int turnId;
 
+  /// Tool use ID for correlating with tool execution
+  final String? toolUseId;
+
+  /// Path that triggered the permission request (e.g., file path for file operations)
+  final String? blockedPath;
+
+  /// Reason why the permission was requested
+  final String? decisionReason;
+
   ClaudeToolPermissionRequest({
     required this.toolName,
     required this.toolInput,
     required this.sessionId,
     required this.turnId,
+    this.toolUseId,
+    this.blockedPath,
+    this.decisionReason,
   });
 
   factory ClaudeToolPermissionRequest.fromJson(Map<String, dynamic> json) =>

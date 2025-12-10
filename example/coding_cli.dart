@@ -37,10 +37,20 @@ Examples:
 void _printReplHelp() {
   print('''
 Available commands:
-  /help   Show this help message
-  /exit   Exit the REPL
-  /quit   Exit the REPL
+  /help    Show this help message
+  /status  Show current session status
+  /exit    Exit the REPL
+  /quit    Exit the REPL
 ''');
+}
+
+void _printStatus(String agentName, String projectDir, String? sessionId) {
+  print('$agentName CLI');
+  print('Project: $projectDir');
+  if (sessionId != null && sessionId.isNotEmpty) {
+    print('Session: $sessionId');
+  }
+  print('');
 }
 
 /// Approval handler callback for interactive tool approval prompts
@@ -230,16 +240,17 @@ Future<void> _oneShot(
   required bool yolo,
   String? sessionId,
 }) async {
-  final handler = yolo ? null : _approvalHandler;
+  // Prompt mode is non-interactive - always pass null for handler
+  // Agent will auto-deny when no handler is provided (unless in yolo mode)
   final session = sessionId != null
       ? await agent.resumeSession(
           sessionId,
           projectDirectory: projectDir,
-          approvalHandler: handler,
+          approvalHandler: null,
         )
       : await agent.createSession(
           projectDirectory: projectDir,
-          approvalHandler: handler,
+          approvalHandler: null,
         );
 
   // Subscribe to events before sending message
@@ -297,10 +308,6 @@ Future<void> _repl(
   required bool yolo,
   String? sessionId,
 }) async {
-  print('$agentName CLI');
-  print('');
-  _printReplHelp();
-
   final handler = yolo ? null : _approvalHandler;
   CodingAgentSession? session;
 
@@ -317,6 +324,10 @@ Future<void> _repl(
       approvalHandler: handler,
     );
   }
+
+  // Show initial status
+  _printStatus(agentName, projectDir, session.sessionId);
+  _printReplHelp();
 
   while (true) {
     stdout.write('You: ');
@@ -335,6 +346,11 @@ Future<void> _repl(
 
     if (trimmed == '/help') {
       _printReplHelp();
+      continue;
+    }
+
+    if (trimmed == '/status') {
+      _printStatus(agentName, projectDir, session.sessionId);
       continue;
     }
 

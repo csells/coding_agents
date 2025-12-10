@@ -4,6 +4,24 @@ import 'dart:io';
 
 import 'claude_events.dart';
 
+/// Response to a control request for tool permission
+class ClaudeControlResponse {
+  /// Whether the tool use is allowed
+  final bool allow;
+
+  /// Message explaining the decision (required for deny)
+  final String? message;
+
+  /// Updated tool input (optional, only for allow)
+  final Map<String, dynamic>? updatedInput;
+
+  ClaudeControlResponse.allow({this.updatedInput}) : allow = true, message = null;
+
+  ClaudeControlResponse.deny({required String this.message})
+      : allow = false,
+        updatedInput = null;
+}
+
 /// A Claude Code session that manages process lifecycle and event streaming
 class ClaudeSession {
   /// Unique session identifier
@@ -66,6 +84,38 @@ class ClaudeSession {
   Future<void> cancel() async {
     _process.kill(ProcessSignal.sigterm);
     await _eventController.close();
+  }
+
+  /// Send a control response back to Claude
+  ///
+  /// This is used to respond to control_request events (e.g., permission prompts).
+  Future<void> sendControlResponse(
+    String requestId,
+    ClaudeControlResponse response,
+  ) async {
+    final responseData = <String, dynamic>{
+      'behavior': response.allow ? 'allow' : 'deny',
+    };
+
+    if (response.allow) {
+      if (response.updatedInput != null) {
+        responseData['updatedInput'] = response.updatedInput;
+      }
+    } else {
+      responseData['message'] = response.message ?? 'Denied by permission handler';
+    }
+
+    final message = {
+      'type': 'control_response',
+      'response': {
+        'subtype': 'success',
+        'request_id': requestId,
+        'response': responseData,
+      },
+    };
+
+    _process.stdin.writeln(jsonEncode(message));
+    await _process.stdin.flush();
   }
 
   /// Formats a user message for sending to the Claude process stdin

@@ -180,11 +180,15 @@ Future<void> _oneShot(
   String projectDir, {
   String? threadId,
 }) async {
-  // Create config with approval handler for interactive mode
+  // Prompt mode is non-interactive - don't pass approval handler
+  // In non-yolo mode, use readOnly sandbox; agent will auto-deny writes
   final config = CodexSessionConfig(
     fullAuto: yolo,
-    // When not in yolo mode, use an approval callback to prompt user
-    approvalHandler: yolo ? null : _approvalHandler,
+    sandboxMode: yolo
+        ? CodexSandboxMode.workspaceWrite // yolo: allow writes
+        : CodexSandboxMode.readOnly, // non-yolo: agent auto-denies writes
+    // Prompt mode is non-interactive - no approval handler
+    approvalHandler: null,
   );
 
   final session = threadId != null
@@ -304,8 +308,12 @@ Future<void> _repl(
     if (input.trim().isEmpty) continue;
 
     // Create config with approval handler for interactive mode
+    // In non-yolo mode, use readOnly sandbox to require approval for writes
     final config = CodexSessionConfig(
       fullAuto: yolo,
+      sandboxMode: yolo
+          ? CodexSandboxMode.workspaceWrite // yolo: allow writes
+          : CodexSandboxMode.readOnly, // non-yolo: require approval for writes
       approvalHandler: yolo ? null : _approvalHandler,
     );
 

@@ -44,22 +44,13 @@ class ClaudeCodingAgent implements CodingAgent {
   });
 
   ClaudeSessionConfig _buildConfig(ToolApprovalHandler? approvalHandler) {
-    // If an approval handler is provided, use delegate mode with adapter
-    if (approvalHandler != null) {
-      return ClaudeSessionConfig(
-        permissionMode: ClaudePermissionMode.delegate,
-        permissionHandler: _wrapApprovalHandler(approvalHandler),
-        model: model,
-        systemPrompt: systemPrompt,
-        appendSystemPrompt: appendSystemPrompt,
-        maxTurns: maxTurns,
-        allowedTools: allowedTools,
-        disallowedTools: disallowedTools,
-      );
-    }
+    // Determine effective permission mode and handler based on configuration
+    final (effectiveMode, effectiveHandler) =
+        _determineEffectiveModeAndHandler(approvalHandler);
 
     return ClaudeSessionConfig(
-      permissionMode: permissionMode,
+      permissionMode: effectiveMode,
+      permissionHandler: effectiveHandler,
       model: model,
       systemPrompt: systemPrompt,
       appendSystemPrompt: appendSystemPrompt,
@@ -69,32 +60,70 @@ class ClaudeCodingAgent implements CodingAgent {
     );
   }
 
-  /// Wrap unified ToolApprovalHandler as ClaudePermissionHandler
+  (ClaudePermissionMode, ClaudePermissionHandler?)
+      _determineEffectiveModeAndHandler(ToolApprovalHandler? approvalHandler) {
+    // If configured for bypassPermissions (yolo mode), use it - no handler needed
+    if (permissionMode == ClaudePermissionMode.bypassPermissions) {
+      return (ClaudePermissionMode.bypassPermissions, null);
+    }
+
+    // If configured for acceptEdits, use it - no handler needed
+    if (permissionMode == ClaudePermissionMode.acceptEdits) {
+      return (ClaudePermissionMode.acceptEdits, null);
+    }
+
+    // Not in yolo/acceptEdits mode - use delegate mode with control_request handling
+    if (approvalHandler == null) {
+      // Prompt mode (non-interactive) - auto-deny all permission requests
+      return (
+        ClaudePermissionMode.delegate,
+        _createAutoDenyHandler(),
+      );
+    }
+
+    // REPL mode (interactive) - use provided handler
+    return (
+      ClaudePermissionMode.delegate,
+      _wrapApprovalHandler(approvalHandler),
+    );
+  }
+
+  /// Creates a handler that auto-denies all permission requests (for prompt mode)
+  ClaudePermissionHandler _createAutoDenyHandler() {
+    return (ClaudeToolPermissionRequest request) async {
+      return ClaudeToolPermissionResponse(
+        behavior: ClaudePermissionBehavior.deny,
+        message: 'Tool execution denied: running in non-interactive mode without '
+            'bypassPermissions. Use bypassPermissions mode for autonomous execution.',
+      );
+    };
+  }
+
+  /// Wraps the unified ToolApprovalHandler to work with Claude's permission system
   ClaudePermissionHandler _wrapApprovalHandler(ToolApprovalHandler handler) {
     return (ClaudeToolPermissionRequest request) async {
-      // Convert Claude request to unified request
-      final unifiedRequest = ToolApprovalRequest(
-        id: '${request.sessionId}_${request.turnId}_${request.toolName}',
-        toolName: request.toolName,
-        description: 'Tool: ${request.toolName}',
-        input: request.toolInput,
-        command: request.toolInput['command'] as String?,
-        filePath: request.toolInput['file_path'] as String? ??
-            request.toolInput['path'] as String?,
+      final response = await handler(
+        ToolApprovalRequest(
+          id: request.toolUseId ??
+              DateTime.now().millisecondsSinceEpoch.toString(),
+          toolName: request.toolName,
+          description: request.decisionReason ??
+              'Tool execution requested: ${request.toolName}',
+          input: request.toolInput,
+          filePath: request.blockedPath,
+        ),
       );
 
-      // Get unified response
-      final unifiedResponse = await handler(unifiedRequest);
+      final behavior = switch (response.decision) {
+        ToolApprovalDecision.allow => ClaudePermissionBehavior.allow,
+        ToolApprovalDecision.allowAlways => ClaudePermissionBehavior.allowAlways,
+        ToolApprovalDecision.deny => ClaudePermissionBehavior.deny,
+        ToolApprovalDecision.denyAlways => ClaudePermissionBehavior.denyAlways,
+      };
 
-      // Convert to Claude response
       return ClaudeToolPermissionResponse(
-        behavior: switch (unifiedResponse.decision) {
-          ToolApprovalDecision.allow => ClaudePermissionBehavior.allow,
-          ToolApprovalDecision.deny => ClaudePermissionBehavior.deny,
-          ToolApprovalDecision.allowAlways => ClaudePermissionBehavior.allowAlways,
-          ToolApprovalDecision.denyAlways => ClaudePermissionBehavior.denyAlways,
-        },
-        message: unifiedResponse.message,
+        behavior: behavior,
+        message: response.message,
       );
     };
   }
@@ -416,6 +445,19 @@ class _ClaudeCodingAgentSession implements CodingAgentSession {
           ),
         );
 
+      case ClaudeControlRequestEvent():
+        // Control requests are handled at the adapter level
+        // Emit as unknown for visibility
+        _eventController.add(
+          CodingAgentUnknownEvent(
+            sessionId: sid,
+            turnId: turnId,
+            timestamp: event.timestamp,
+            originalType: 'claude_control_request',
+            data: event.rawRequest,
+          ),
+        );
+
       case ClaudeUnknownEvent():
         _eventController.add(
           CodingAgentUnknownEvent(
@@ -624,6 +666,19 @@ class _ClaudeCodingAgentSession implements CodingAgentSession {
               'output': event.output,
               'error': event.error,
             },
+          ),
+        );
+
+      case ClaudeControlRequestEvent():
+        // Control requests are handled at the adapter level
+        // Emit as unknown for visibility
+        events.add(
+          CodingAgentUnknownEvent(
+            sessionId: sid,
+            turnId: turnId,
+            timestamp: event.timestamp,
+            originalType: 'claude_control_request',
+            data: event.rawRequest,
           ),
         );
 

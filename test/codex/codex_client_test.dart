@@ -14,8 +14,12 @@ void main() {
 
       expect(args, contains('app-server'));
       expect(args, contains('-c'));
-      expect(args.any((a) => a.contains('approval_policy="on-request"')), isTrue);
-      expect(args.any((a) => a.contains('sandbox_mode="workspace-write"')), isTrue);
+      // NOTE: No quotes around values - Process.start doesn't use shell processing
+      expect(args.any((a) => a.contains('approval_policy=on-request')), isTrue);
+      expect(
+        args.any((a) => a.contains('sandbox_mode=workspace-write')),
+        isTrue,
+      );
     });
 
     test('buildAppServerArgs includes fullAuto config overrides', () {
@@ -24,8 +28,11 @@ void main() {
 
       final args = client.buildAppServerArgs(config);
 
-      expect(args.any((a) => a.contains('approval_policy="on-failure"')), isTrue);
-      expect(args.any((a) => a.contains('sandbox_mode="workspace-write"')), isTrue);
+      expect(args.any((a) => a.contains('approval_policy=on-failure')), isTrue);
+      expect(
+        args.any((a) => a.contains('sandbox_mode=workspace-write')),
+        isTrue,
+      );
     });
 
     test('buildAppServerArgs includes model when specified', () {
@@ -35,7 +42,7 @@ void main() {
       final args = client.buildAppServerArgs(config);
 
       expect(args, contains('-c'));
-      expect(args.any((a) => a.contains('model="o3"')), isTrue);
+      expect(args.any((a) => a.contains('model=o3')), isTrue);
     });
 
     test('buildAppServerArgs includes untrusted approval policy', () {
@@ -47,7 +54,7 @@ void main() {
       final args = client.buildAppServerArgs(config);
 
       expect(args, contains('-c'));
-      expect(args.any((a) => a.contains('approval_policy="untrusted"')), isTrue);
+      expect(args.any((a) => a.contains('approval_policy=untrusted')), isTrue);
     });
 
     test('buildAppServerArgs includes readOnly sandbox mode', () {
@@ -57,7 +64,7 @@ void main() {
       final args = client.buildAppServerArgs(config);
 
       expect(args, contains('-c'));
-      expect(args.any((a) => a.contains('sandbox_mode="read-only"')), isTrue);
+      expect(args.any((a) => a.contains('sandbox_mode=read-only')), isTrue);
     });
 
     test('buildAppServerArgs includes config overrides', () {

@@ -53,6 +53,40 @@ sealed class CodexEvent {
               turnId: turnId,
               usage: null,
             );
+          case 'exec_command_begin':
+            // Convert exec_command_begin to CodexItemStartedEvent with tool call
+            final callId = msg['call_id'] as String? ?? '';
+            final command = msg['command'] as List<dynamic>? ?? [];
+            final commandStr = command.join(' ');
+            return CodexItemStartedEvent(
+              threadId: convId,
+              turnId: turnId,
+              item: CodexToolCallItem(
+                id: callId,
+                name: 'shell',
+                arguments: {'command': commandStr},
+              ),
+            );
+          case 'exec_command_end':
+            // Convert exec_command_end to CodexItemCompletedEvent with tool call
+            final callId = msg['call_id'] as String? ?? '';
+            final stdout = msg['stdout'] as String? ?? '';
+            final stderr = msg['stderr'] as String? ?? '';
+            final exitCode = msg['exit_code'] as int?;
+            // Combine stdout and stderr for output
+            final output = stdout.isNotEmpty ? stdout : stderr;
+            return CodexItemCompletedEvent(
+              threadId: convId,
+              turnId: turnId,
+              item: CodexToolCallItem(
+                id: callId,
+                name: 'shell',
+                arguments: {},
+                output: output,
+                exitCode: exitCode,
+              ),
+              status: exitCode == 0 ? 'completed' : 'failed',
+            );
           default:
             return CodexUnknownEvent(
               threadId: convId,

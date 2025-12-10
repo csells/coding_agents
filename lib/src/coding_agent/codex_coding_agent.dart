@@ -44,20 +44,66 @@ class CodexCodingAgent implements CodingAgent {
     this.configOverrides,
   });
 
-  CodexSessionConfig _buildConfig(ToolApprovalHandler? approvalHandler) =>
-      CodexSessionConfig(
-        approvalPolicy: approvalPolicy,
-        sandboxMode: sandboxMode,
-        approvalHandler: approvalHandler != null
-            ? _wrapApprovalHandler(approvalHandler)
-            : null,
-        fullAuto: fullAuto,
-        dangerouslyBypassAll: dangerouslyBypassAll,
-        model: model,
-        enableWebSearch: enableWebSearch,
-        environment: environment,
-        configOverrides: configOverrides,
+  CodexSessionConfig _buildConfig(ToolApprovalHandler? approvalHandler) {
+    // Determine the effective approval handler
+    final effectiveHandler = _determineEffectiveHandler(approvalHandler);
+
+    // Determine effective sandbox mode
+    // In fullAuto/bypass mode, use configured sandbox mode
+    // Otherwise, use readOnly to require approval for writes (consistent with Claude/Gemini)
+    final effectiveSandboxMode = (fullAuto || dangerouslyBypassAll)
+        ? sandboxMode
+        : CodexSandboxMode.readOnly;
+
+    // Determine effective approval policy
+    // In fullAuto/bypass mode, use configured policy
+    // Otherwise, use 'onRequest' to force approval requests for all operations
+    // (which will be auto-denied by the handler)
+    final effectiveApprovalPolicy = (fullAuto || dangerouslyBypassAll)
+        ? approvalPolicy
+        : CodexApprovalPolicy.onRequest;
+
+    return CodexSessionConfig(
+      approvalPolicy: effectiveApprovalPolicy,
+      sandboxMode: effectiveSandboxMode,
+      approvalHandler: effectiveHandler,
+      fullAuto: fullAuto,
+      dangerouslyBypassAll: dangerouslyBypassAll,
+      model: model,
+      enableWebSearch: enableWebSearch,
+      environment: environment,
+      configOverrides: configOverrides,
+    );
+  }
+
+  CodexApprovalHandler? _determineEffectiveHandler(
+    ToolApprovalHandler? approvalHandler,
+  ) {
+    // In fullAuto or dangerouslyBypassAll mode, no handler needed
+    if (fullAuto || dangerouslyBypassAll) {
+      return null;
+    }
+
+    // If handler provided, wrap it
+    if (approvalHandler != null) {
+      return _wrapApprovalHandler(approvalHandler);
+    }
+
+    // No handler provided and not in bypass mode - auto-deny
+    // This prevents hanging while waiting for interactive approval
+    return _createAutoDenyHandler();
+  }
+
+  /// Creates a handler that auto-denies all approval requests (for prompt mode)
+  CodexApprovalHandler _createAutoDenyHandler() {
+    return (CodexApprovalRequest request) async {
+      return CodexApprovalResponse(
+        decision: CodexApprovalDecision.deny,
+        message: 'Tool execution denied: running in non-interactive mode without '
+            'fullAuto or dangerouslyBypassAll. Use fullAuto mode for autonomous execution.',
       );
+    };
+  }
 
   /// Wrap unified ToolApprovalHandler as CodexApprovalHandler
   CodexApprovalHandler _wrapApprovalHandler(ToolApprovalHandler handler) {
@@ -409,8 +455,8 @@ class _CodexCodingAgentSession implements CodingAgentSession {
         }
 
       case CodexToolCallItem():
-        if (isStart || isUpdate) {
-          // Emit tool use event when tool call starts
+        // Emit tool use event when starting (or on complete if never started)
+        if (isStart || isUpdate || (isComplete && item.arguments.isNotEmpty)) {
           _eventController.add(
             CodingAgentToolUseEvent(
               sessionId: sessionId,

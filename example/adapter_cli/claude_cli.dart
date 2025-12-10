@@ -185,11 +185,13 @@ Future<void> _oneShot(
   String projectDir, {
   String? sessionId,
 }) async {
+  // Prompt mode is non-interactive - don't pass permission handler
+  // In non-yolo mode, Claude will auto-deny permission requests
   final config = ClaudeSessionConfig(
     permissionMode: yolo
         ? ClaudePermissionMode.bypassPermissions
         : ClaudePermissionMode.delegate,
-    permissionHandler: yolo ? null : _claudeApprovalHandler,
+    permissionHandler: null, // Non-interactive: auto-deny
     maxTurns: 1,
   );
 

@@ -52,7 +52,7 @@ void main() {
       expect(args, contains('--dangerously-skip-permissions'));
     });
 
-    test('buildArgs includes delegate permission mode with MCP tool', () {
+    test('buildArgs includes delegate permission mode with stdio', () {
       final client = ClaudeCodeCliAdapter();
       final config = ClaudeSessionConfig(
         permissionMode: ClaudePermissionMode.delegate,
@@ -64,7 +64,7 @@ void main() {
       final args = client.buildArgs(config, null);
 
       expect(args, contains('--permission-prompt-tool'));
-      expect(args.any((a) => a.contains('mcp__')), isTrue);
+      expect(args, contains('stdio'));
     });
 
     test('buildArgs includes model when specified', () {

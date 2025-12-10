@@ -32,24 +32,44 @@ class GeminiCodingAgent implements CodingAgent {
     this.debug = false,
   });
 
-  GeminiSessionConfig _buildConfig() => GeminiSessionConfig(
-    approvalMode: approvalMode,
-    sandbox: sandbox,
-    sandboxImage: sandboxImage,
-    model: model,
-    debug: debug,
-  );
+  GeminiSessionConfig _buildConfig(ToolApprovalHandler? approvalHandler) {
+    // Determine effective approval mode based on configuration and handler presence
+    final effectiveMode = _determineEffectiveMode(approvalHandler);
+
+    return GeminiSessionConfig(
+      approvalMode: effectiveMode,
+      sandbox: sandbox,
+      sandboxImage: sandboxImage,
+      model: model,
+      debug: debug,
+    );
+  }
+
+  GeminiApprovalMode _determineEffectiveMode(
+    ToolApprovalHandler? approvalHandler,
+  ) {
+    // If configured for yolo or autoEdit mode, use it
+    if (approvalMode == GeminiApprovalMode.yolo ||
+        approvalMode == GeminiApprovalMode.autoEdit) {
+      return approvalMode;
+    }
+
+    // Not in yolo/autoEdit mode - use defaultMode
+    // In defaultMode, Gemini CLI will not have write tools available,
+    // which effectively "denies" dangerous operations.
+    // Note: Gemini CLI doesn't support interactive approval handlers,
+    // so the approvalHandler parameter is ignored for Gemini.
+    return GeminiApprovalMode.defaultMode;
+  }
 
   @override
   Future<CodingAgentSession> createSession({
     required String projectDirectory,
     ToolApprovalHandler? approvalHandler,
   }) async {
-    // Note: Gemini does not support interactive approval handling.
-    // The approvalHandler parameter is ignored.
     return _GeminiCodingAgentSession(
       adapter: _adapter,
-      config: _buildConfig(),
+      config: _buildConfig(approvalHandler),
       projectDirectory: projectDirectory,
       existingSessionId: null,
     );
@@ -61,11 +81,9 @@ class GeminiCodingAgent implements CodingAgent {
     required String projectDirectory,
     ToolApprovalHandler? approvalHandler,
   }) async {
-    // Note: Gemini does not support interactive approval handling.
-    // The approvalHandler parameter is ignored.
     return _GeminiCodingAgentSession(
       adapter: _adapter,
-      config: _buildConfig(),
+      config: _buildConfig(approvalHandler),
       projectDirectory: projectDirectory,
       existingSessionId: sessionId,
     );

@@ -175,10 +175,22 @@ class CodexSession {
   }
 
   /// Handle an approval request by invoking the callback
+  ///
+  /// If no approval handler is set, auto-deny the request to prevent
+  /// tool execution in non-interactive mode.
   Future<void> handleApprovalRequest(CodexApprovalRequest request) async {
     if (_approvalHandler != null) {
       final response = await _approvalHandler(request);
       await respondToApproval(request.id, response);
+    } else {
+      // No handler - auto-deny to prevent tool execution
+      await respondToApproval(
+        request.id,
+        CodexApprovalResponse(
+          decision: CodexApprovalDecision.deny,
+          message: 'Auto-denied: no approval handler configured',
+        ),
+      );
     }
   }
 

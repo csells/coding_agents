@@ -149,6 +149,10 @@ class GeminiSession {
         }
         _eventController.addError(exception);
       }
+      // Close stream after process exits (Gemini is process-per-turn)
+      if (!_eventController.isClosed) {
+        await _eventController.close();
+      }
     });
 
     // Close stdin to signal no more input for this turn
@@ -188,16 +192,16 @@ class GeminiSession {
   }
 
   void _addConfigArgs(List<String> args) {
-    // Approval mode
+    // Approval mode - use --approval-mode flag for explicit control
     switch (_config.approvalMode) {
       case GeminiApprovalMode.defaultMode:
-        // No additional flags
+        args.addAll(['--approval-mode', 'default']);
         break;
       case GeminiApprovalMode.autoEdit:
-        args.add('--auto-edit');
+        args.addAll(['--approval-mode', 'auto_edit']);
         break;
       case GeminiApprovalMode.yolo:
-        args.add('-y');
+        args.addAll(['--approval-mode', 'yolo']);
         break;
     }
 

@@ -31,6 +31,9 @@ ClaudeToolPermissionRequest _$ClaudeToolPermissionRequestFromJson(
   toolInput: json['toolInput'] as Map<String, dynamic>,
   sessionId: json['sessionId'] as String,
   turnId: (json['turnId'] as num).toInt(),
+  toolUseId: json['toolUseId'] as String?,
+  blockedPath: json['blockedPath'] as String?,
+  decisionReason: json['decisionReason'] as String?,
 );
 
 Map<String, dynamic> _$ClaudeToolPermissionRequestToJson(
@@ -40,6 +43,9 @@ Map<String, dynamic> _$ClaudeToolPermissionRequestToJson(
   'toolInput': instance.toolInput,
   'sessionId': instance.sessionId,
   'turnId': instance.turnId,
+  'toolUseId': instance.toolUseId,
+  'blockedPath': instance.blockedPath,
+  'decisionReason': instance.decisionReason,
 };
 
 ClaudeToolPermissionResponse _$ClaudeToolPermissionResponseFromJson(

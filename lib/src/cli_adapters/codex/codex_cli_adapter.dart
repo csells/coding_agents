@@ -320,15 +320,25 @@ class CodexCliAdapter {
     );
 
     // Start conversation (v1)
+    // NOTE: sandbox and approval_policy MUST be passed in the RPC params,
+    // not as CLI -c config overrides, for them to take effect.
     rpcId++;
     final newConvFuture = Completer<Map<String, dynamic>>();
     preSessionPending['$rpcId'] = newConvFuture;
+    final newConvParams = <String, dynamic>{
+      'cwd': projectDirectory,
+      'sandbox': _formatEnumArg(config.sandboxMode.name),
+      'approval_policy': _formatEnumArg(config.approvalPolicy.name),
+    };
+    if (config.model != null) {
+      newConvParams['model'] = config.model;
+    }
     process.stdin.writeln(
       jsonEncode({
         'jsonrpc': '2.0',
         'id': rpcId,
         'method': 'newConversation',
-        'params': {'cwd': projectDirectory},
+        'params': newConvParams,
       }),
     );
     final newConvResp = await newConvFuture.future.timeout(
@@ -509,6 +519,8 @@ class CodexCliAdapter {
     );
 
     // Resume conversation (v1)
+    // NOTE: sandbox and approval_policy MUST be passed in the RPC params,
+    // not as CLI -c config overrides, for them to take effect.
     rpcId++;
     final resumeFuture = Completer<Map<String, dynamic>>();
     preSessionPending['$rpcId'] = resumeFuture;
@@ -517,7 +529,12 @@ class CodexCliAdapter {
         'jsonrpc': '2.0',
         'id': rpcId,
         'method': 'resumeConversation',
-        'params': {'conversationId': threadId, 'path': sessionFilePath},
+        'params': {
+          'conversationId': threadId,
+          'path': sessionFilePath,
+          'sandbox': _formatEnumArg(config.sandboxMode.name),
+          'approval_policy': _formatEnumArg(config.approvalPolicy.name),
+        },
       }),
     );
     await resumeFuture.future.timeout(
@@ -682,26 +699,27 @@ class CodexCliAdapter {
     final args = <String>['app-server'];
 
     // Handle fullAuto mode - equivalent to approval_policy=on-failure + sandbox_mode=workspace-write
+    // NOTE: Don't use quotes around values - Process.start doesn't use shell processing
     if (config.fullAuto) {
-      args.addAll(['-c', 'approval_policy="on-failure"']);
-      args.addAll(['-c', 'sandbox_mode="workspace-write"']);
+      args.addAll(['-c', 'approval_policy=on-failure']);
+      args.addAll(['-c', 'sandbox_mode=workspace-write']);
     } else {
       // Approval policy
       args.addAll([
         '-c',
-        'approval_policy="${_formatEnumArg(config.approvalPolicy.name)}"',
+        'approval_policy=${_formatEnumArg(config.approvalPolicy.name)}',
       ]);
 
       // Sandbox mode
       args.addAll([
         '-c',
-        'sandbox_mode="${_formatEnumArg(config.sandboxMode.name)}"',
+        'sandbox_mode=${_formatEnumArg(config.sandboxMode.name)}',
       ]);
     }
 
     // Model
     if (config.model != null) {
-      args.addAll(['-c', 'model="${config.model}"']);
+      args.addAll(['-c', 'model=${config.model}']);
     }
 
     // Config overrides (raw -c flags from user)

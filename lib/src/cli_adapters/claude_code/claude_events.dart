@@ -26,6 +26,7 @@ sealed class ClaudeEvent {
       'system' => ClaudeSystemEvent.fromJson(json, turnId),
       'tool_progress' => ClaudeToolProgressEvent.fromJson(json, turnId),
       'auth_status' => ClaudeAuthStatusEvent.fromJson(json, turnId),
+      'control_request' => ClaudeControlRequestEvent.fromJson(json, turnId),
       _ => ClaudeUnknownEvent(
         sessionId: sessionId,
         turnId: turnId,
@@ -300,6 +301,57 @@ class ClaudeAuthStatusEvent extends ClaudeEvent {
               .toList() ??
           [],
       error: json['error'] as String?,
+    );
+  }
+}
+
+/// Control request event - permission prompts via stdio control channel
+///
+/// Sent by Claude when it needs permission to use a tool.
+/// Requires a control_response to be sent back via stdin.
+class ClaudeControlRequestEvent extends ClaudeEvent {
+  final String requestId;
+  final String subtype; // "can_use_tool"
+  final String? toolName;
+  final Map<String, dynamic>? toolInput;
+  final String? toolUseId;
+  final String? blockedPath;
+  final String? decisionReason;
+  final Map<String, dynamic> rawRequest;
+
+  ClaudeControlRequestEvent({
+    required super.sessionId,
+    required super.turnId,
+    required super.timestamp,
+    required this.requestId,
+    required this.subtype,
+    this.toolName,
+    this.toolInput,
+    this.toolUseId,
+    this.blockedPath,
+    this.decisionReason,
+    required this.rawRequest,
+  });
+
+  factory ClaudeControlRequestEvent.fromJson(
+    Map<String, dynamic> json,
+    int turnId,
+  ) {
+    final sessionId = json['session_id'] as String? ?? '';
+    final request = json['request'] as Map<String, dynamic>? ?? {};
+
+    return ClaudeControlRequestEvent(
+      sessionId: sessionId,
+      turnId: turnId,
+      timestamp: DateTime.now(),
+      requestId: json['request_id'] as String? ?? '',
+      subtype: request['subtype'] as String? ?? '',
+      toolName: request['tool_name'] as String?,
+      toolInput: request['input'] as Map<String, dynamic>?,
+      toolUseId: request['tool_use_id'] as String?,
+      blockedPath: request['blocked_path'] as String?,
+      decisionReason: request['decision_reason'] as String?,
+      rawRequest: json,
     );
   }
 }
