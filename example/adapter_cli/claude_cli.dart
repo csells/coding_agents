@@ -265,6 +265,7 @@ Future<void> _repl(
   _printReplHelp();
 
   String? currentSessionId = sessionId;
+  ClaudeSession? currentSession;
 
   while (true) {
     stdout.write('You: ');
@@ -272,12 +273,14 @@ Future<void> _repl(
 
     if (input == null) {
       print('Goodbye!');
+      await currentSession?.cancel();
       break;
     }
 
     final trimmed = input.trim().toLowerCase();
     if (trimmed == '/exit' || trimmed == '/quit') {
       print('Goodbye!');
+      await currentSession?.cancel();
       break;
     }
 
@@ -295,7 +298,7 @@ Future<void> _repl(
       permissionHandler: yolo ? null : _claudeApprovalHandler,
     );
 
-    final session = currentSessionId != null
+    currentSession = currentSessionId != null
         ? await client.resumeSession(
             currentSessionId,
             config,
@@ -306,12 +309,12 @@ Future<void> _repl(
             projectDirectory: projectDir,
           );
 
-    currentSessionId = session.sessionId;
+    currentSessionId = currentSession.sessionId;
 
-    await session.send(input);
+    await currentSession.send(input);
 
     stdout.write('Claude: ');
-    await for (final event in session.events) {
+    await for (final event in currentSession.events) {
       switch (event) {
         case ClaudeAssistantEvent():
           for (final block in event.content) {

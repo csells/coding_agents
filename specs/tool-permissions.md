@@ -208,7 +208,9 @@ Without it, Codex may execute operations without requesting approval (e.g., with
 
 ### 3.3 Gemini CLI
 
-Gemini uses approval modes that control available tools.
+Gemini uses approval modes that control which tools are **loaded and available**.
+Unlike Claude and Codex, Gemini does not use approval handlers - it controls
+permissions by restricting which tools the model can even attempt to use.
 
 ```dart
 GeminiCodingAgent(
@@ -218,11 +220,27 @@ GeminiCodingAgent(
 
 **Approval modes:**
 
-| Mode          | Write Tools | Shell Commands | Notes                    |
-|---------------|-------------|----------------|--------------------------|
-| `defaultMode` | No          | Limited        | Safe, read-only          |
-| `autoEdit`    | Yes         | Limited        | Auto-approve file edits  |
-| `yolo`        | Yes         | Yes            | Full autonomous mode     |
+| Mode          | Write Tools | Shell Commands | Notes                              |
+|---------------|-------------|----------------|------------------------------------|
+| `defaultMode` | No          | No             | Read-only tools only               |
+| `autoEdit`    | Yes         | Yes            | Write tools loaded, auto-approved  |
+| `yolo`        | Yes         | Yes            | All tools loaded, auto-approved    |
+
+**Key insight:** In `defaultMode`, write tools (`write_file`, `replace`) and shell
+tools (`run_shell_command`) are **not loaded** by Gemini CLI. The model literally
+cannot use them because they don't exist in its tool registry. This is different
+from Claude/Codex where tools exist but approval is denied - with Gemini, the
+tools are simply not available.
+
+**Available tools by mode:**
+
+| Mode          | Available Tools                                                    |
+|---------------|--------------------------------------------------------------------|
+| `defaultMode` | `list_directory`, `read_file`, `search_file_content`, `glob`,      |
+|               | `save_memory`, `google_web_search`, `write_todos`,                 |
+|               | `codebase_investigator`                                            |
+| `autoEdit`    | All of the above PLUS: `write_file`, `replace`, `run_shell_command`|
+| `yolo`        | Same as `autoEdit` (all tools auto-approved)                       |
 
 **Permission flow:**
 
@@ -233,19 +251,31 @@ GeminiCodingAgent(
 │                                                                     │
 │  approvalMode == yolo?                                              │
 │         │                                                           │
-│         ├── Yes ──▶ All tools available, auto-approve               │
+│         ├── Yes ──▶ All tools loaded, auto-approve                  │
 │         │                                                           │
 │         └── No ──▶ approvalMode == autoEdit?                        │
 │                           │                                         │
-│                           ├── Yes ──▶ Write tools available         │
+│                           ├── Yes ──▶ Write tools loaded            │
 │                           │                                         │
-│                           └── No ──▶ Limited tools (effectivedeny)  │
+│                           └── No ──▶ Write tools NOT LOADED         │
+│                                      (model cannot use them)        │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Note:** Gemini CLI does not support interactive approval handlers. Permission
-control is entirely mode-based.
+**Important:** Gemini CLI does not support interactive approval handlers. There is
+no way to prompt the user for approval - permission control is entirely mode-based
+through tool availability. When the model attempts an operation it cannot perform
+(e.g., writing a file in `defaultMode`), it gracefully acknowledges the limitation
+and stops.
+
+**CLI flag mapping:**
+
+| Our Mode      | Gemini CLI Flag             |
+|---------------|-----------------------------|
+| `defaultMode` | `--approval-mode default`   |
+| `autoEdit`    | `--approval-mode auto_edit` |
+| `yolo`        | `--approval-mode yolo`      |
 
 ---
 

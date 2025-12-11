@@ -173,7 +173,7 @@ class GeminiSession {
 
   /// Builds command-line arguments for starting a new Gemini session
   List<String> _buildInitialArgs(String prompt) {
-    // Gemini CLI uses positional prompt argument, not -p
+    // Gemini CLI uses positional prompt argument for initial session
     final args = <String>[prompt, '-o', 'stream-json'];
 
     _addConfigArgs(args);
@@ -193,6 +193,9 @@ class GeminiSession {
 
   void _addConfigArgs(List<String> args) {
     // Approval mode - use --approval-mode flag for explicit control
+    // Note: In headless mode (-o stream-json), 'default' will reject tool calls
+    // since there's no interactive prompt. Use 'auto_edit' or 'yolo' to enable
+    // tools in headless mode.
     switch (_config.approvalMode) {
       case GeminiApprovalMode.defaultMode:
         args.addAll(['--approval-mode', 'default']);
