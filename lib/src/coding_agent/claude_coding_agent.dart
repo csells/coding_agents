@@ -398,6 +398,9 @@ class _ClaudeCodingAgentSession implements CodingAgentSession {
             errorMessage: event.isError ? (event.result ?? event.error) : null,
           ),
         );
+        // Mark turn complete when result event is received
+        // This allows sendMessage to be called immediately after TurnEndEvent
+        _turnInProgress = false;
 
       case ClaudeSystemEvent():
         // System events are mostly internal (init, compact_boundary)

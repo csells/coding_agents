@@ -344,8 +344,12 @@ class ClaudeCodeCliAdapter {
       ).then((response) {
         final isAllowed = response.behavior == ClaudePermissionBehavior.allow ||
             response.behavior == ClaudePermissionBehavior.allowAlways;
+        // For allow responses, updatedInput MUST contain the tool input.
+        // If handler doesn't provide it, use the original input from the request.
         final controlResponse = isAllowed
-            ? ClaudeControlResponse.allow(updatedInput: response.updatedInput)
+            ? ClaudeControlResponse.allow(
+                updatedInput: response.updatedInput ?? event.toolInput ?? const {},
+              )
             : ClaudeControlResponse.deny(
                 message: response.message ?? 'Denied by permission handler',
               );

@@ -98,9 +98,8 @@ class ClaudeSession {
     };
 
     if (response.allow) {
-      if (response.updatedInput != null) {
-        responseData['updatedInput'] = response.updatedInput;
-      }
+      // updatedInput is REQUIRED for allow responses (even if empty)
+      responseData['updatedInput'] = response.updatedInput ?? <String, dynamic>{};
     } else {
       responseData['message'] = response.message ?? 'Denied by permission handler';
     }
