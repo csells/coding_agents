@@ -82,8 +82,19 @@ class ClaudeSession {
 
   /// Cancel the current operation and close the session
   Future<void> cancel() async {
-    _process.kill(ProcessSignal.sigterm);
-    await _eventController.close();
+    // Close stdin first
+    try {
+      await _process.stdin.close();
+    } on StateError {
+      // Stdin already closed
+    }
+
+    // Send SIGINT to trigger clean exit - Claude CLI handles this gracefully
+    // (equivalent to Ctrl+C in terminal)
+    _process.kill(ProcessSignal.sigint);
+
+    // Wait for the process to exit gracefully
+    await _process.exitCode;
   }
 
   /// Send a control response back to Claude

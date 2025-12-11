@@ -114,18 +114,31 @@ class CodexSession {
 
   /// Cancel the current operation and close the session
   Future<void> cancel() async {
-    // Send interrupt request if process stdin is still open
+    // Send interrupt request to cancel any active turn
     final request = _buildRpcRequest('interrupt', {'thread_id': threadId});
     try {
       _writeToStdin(request);
     } on StateError {
-      // Stdin already closed - process shutting down, continue with kill
+      // Stdin already closed - process already shutting down
     } on IOException {
-      // I/O error writing to stdin - process likely dead, continue with kill
+      // I/O error writing to stdin - process likely dead
     }
 
-    _process.kill(ProcessSignal.sigterm);
-    await _eventController.close();
+    // Close stdin to signal end of session - Codex will exit gracefully
+    try {
+      await _process.stdin.close();
+    } on StateError {
+      // Stdin already closed
+    }
+
+    // Wait for the process to exit gracefully
+    await _process.exitCode;
+
+    // The exitCode.then callback in the adapter will close the controller,
+    // but call close() anyway in case it hasn't run yet
+    if (!_eventController.isClosed) {
+      await _eventController.close();
+    }
   }
 
   /// Build a JSON-RPC request

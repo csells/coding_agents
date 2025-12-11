@@ -193,6 +193,7 @@ class _CodexCodingAgentSession implements CodingAgentSession {
   int _turnCounter = 0;
   bool _turnInProgress = false;
   CodexSession? _currentUnderlyingSession;
+  StreamSubscription<CodexEvent>? _currentSubscription;
   bool _sawPartialThisTurn = false;
   final Set<int> _agentMessageSeenTurns = {};
 
@@ -245,8 +246,11 @@ class _CodexCodingAgentSession implements CodingAgentSession {
 
     _currentUnderlyingSession = underlyingSession;
 
+    // Cancel any existing subscription before creating a new one
+    await _currentSubscription?.cancel();
+
     // Transform and forward events
-    underlyingSession.events.listen(
+    _currentSubscription = underlyingSession.events.listen(
       (event) => _transformAndEmit(event, turnId),
       onError: (Object e) {
         if (!_eventController.isClosed) {
@@ -256,6 +260,7 @@ class _CodexCodingAgentSession implements CodingAgentSession {
       onDone: () {
         _turnInProgress = false;
         _currentUnderlyingSession = null;
+        _currentSubscription = null;
       },
     );
 
@@ -360,6 +365,9 @@ class _CodexCodingAgentSession implements CodingAgentSession {
             usage: usage,
           ),
         );
+        // Mark turn complete when turn end event is received
+        // This allows sendMessage to be called immediately after TurnEndEvent
+        _turnInProgress = false;
 
       case CodexTurnFailedEvent():
         _sawPartialThisTurn = false;
@@ -373,6 +381,8 @@ class _CodexCodingAgentSession implements CodingAgentSession {
             errorMessage: event.message,
           ),
         );
+        // Mark turn complete when turn end event is received
+        _turnInProgress = false;
 
       case CodexErrorEvent():
         _eventController.add(
@@ -879,8 +889,13 @@ class _CodexCodingAgentSession implements CodingAgentSession {
 
   @override
   Future<void> close() async {
+    // Cancel the subscription first to prevent it from blocking the close
+    await _currentSubscription?.cancel();
+    _currentSubscription = null;
+
     if (_currentUnderlyingSession != null) {
       await _currentUnderlyingSession!.cancel();
+      _currentUnderlyingSession = null;
     }
     await _eventController.close();
   }

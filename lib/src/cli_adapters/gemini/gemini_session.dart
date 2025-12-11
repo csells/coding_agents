@@ -167,8 +167,22 @@ class GeminiSession {
 
   /// Cancel the current operation and close the session
   Future<void> cancel() async {
-    _currentProcess?.kill(ProcessSignal.sigterm);
-    await _eventController.close();
+    final process = _currentProcess;
+    if (process != null) {
+      // Close stdin to signal end of session - Gemini exits on EOF
+      try {
+        await process.stdin.close();
+      } on StateError {
+        // Stdin already closed
+      }
+      // Wait for the process to exit gracefully
+      await process.exitCode;
+    }
+    // The exitCode.then callback will close the controller,
+    // but call close() anyway in case it hasn't run yet
+    if (!_eventController.isClosed) {
+      await _eventController.close();
+    }
   }
 
   /// Builds command-line arguments for starting a new Gemini session

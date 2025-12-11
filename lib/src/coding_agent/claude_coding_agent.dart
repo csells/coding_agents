@@ -187,6 +187,7 @@ class _ClaudeCodingAgentSession implements CodingAgentSession {
   int _turnCounter = 0;
   bool _turnInProgress = false;
   ClaudeSession? _currentUnderlyingSession;
+  StreamSubscription<ClaudeEvent>? _currentSubscription;
 
   _ClaudeCodingAgentSession({
     required ClaudeCodeCliAdapter adapter,
@@ -237,8 +238,11 @@ class _ClaudeCodingAgentSession implements CodingAgentSession {
 
     _currentUnderlyingSession = underlyingSession;
 
+    // Cancel any existing subscription before creating a new one
+    await _currentSubscription?.cancel();
+
     // Transform and forward events
-    underlyingSession.events.listen(
+    _currentSubscription = underlyingSession.events.listen(
       (event) => _transformAndEmit(event, turnId),
       onError: (Object e) {
         if (!_eventController.isClosed) {
@@ -248,6 +252,7 @@ class _ClaudeCodingAgentSession implements CodingAgentSession {
       onDone: () {
         _turnInProgress = false;
         _currentUnderlyingSession = null;
+        _currentSubscription = null;
       },
     );
 
@@ -702,8 +707,13 @@ class _ClaudeCodingAgentSession implements CodingAgentSession {
 
   @override
   Future<void> close() async {
+    // Cancel the subscription first to prevent it from blocking the close
+    await _currentSubscription?.cancel();
+    _currentSubscription = null;
+
     if (_currentUnderlyingSession != null) {
       await _currentUnderlyingSession!.cancel();
+      _currentUnderlyingSession = null;
     }
     await _eventController.close();
   }

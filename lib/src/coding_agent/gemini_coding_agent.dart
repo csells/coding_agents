@@ -120,6 +120,7 @@ class _GeminiCodingAgentSession implements CodingAgentSession {
   int _turnCounter = 0;
   bool _turnInProgress = false;
   GeminiSession? _currentUnderlyingSession;
+  StreamSubscription<GeminiEvent>? _currentSubscription;
 
   _GeminiCodingAgentSession({
     required GeminiCliAdapter adapter,
@@ -169,8 +170,11 @@ class _GeminiCodingAgentSession implements CodingAgentSession {
 
     _currentUnderlyingSession = underlyingSession;
 
+    // Cancel any existing subscription before creating a new one
+    await _currentSubscription?.cancel();
+
     // Transform and forward events
-    underlyingSession.events.listen(
+    _currentSubscription = underlyingSession.events.listen(
       (event) => _transformAndEmit(event, turnId),
       onError: (Object e) {
         if (!_eventController.isClosed) {
@@ -180,6 +184,7 @@ class _GeminiCodingAgentSession implements CodingAgentSession {
       onDone: () {
         _turnInProgress = false;
         _currentUnderlyingSession = null;
+        _currentSubscription = null;
       },
     );
 
@@ -277,6 +282,9 @@ class _GeminiCodingAgentSession implements CodingAgentSession {
             errorMessage: errorMessage,
           ),
         );
+        // Mark turn complete when result event is received
+        // This allows sendMessage to be called immediately after TurnEndEvent
+        _turnInProgress = false;
 
       case GeminiErrorEvent():
         _eventController.add(
@@ -470,8 +478,13 @@ class _GeminiCodingAgentSession implements CodingAgentSession {
 
   @override
   Future<void> close() async {
+    // Cancel the subscription first to prevent it from blocking the close
+    await _currentSubscription?.cancel();
+    _currentSubscription = null;
+
     if (_currentUnderlyingSession != null) {
       await _currentUnderlyingSession!.cancel();
+      _currentUnderlyingSession = null;
     }
     await _eventController.close();
   }

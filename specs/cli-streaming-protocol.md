@@ -105,6 +105,64 @@ Each line of output is a complete, self-contained JSON object:
 5. Process exits with status code (0 = success)
 ```
 
+### 2.4 Clean Session Termination
+
+**IMPORTANT:** Each CLI supports graceful termination. Do NOT use SIGTERM or
+SIGKILL to terminate sessions. Instead, use the protocol-specific clean shutdown
+mechanism:
+
+| CLI             | Termination Protocol                                         |
+| --------------- | ------------------------------------------------------------ |
+| **Claude Code** | Close stdin (EOF signal) - process exits gracefully          |
+| **Codex CLI**   | Send `interrupt` JSON-RPC request, then close stdin          |
+| **Gemini CLI**  | Close stdin (EOF signal) - process exits on EOF              |
+
+**Implementation pattern:**
+
+```dart
+// Claude Code - close stdin, await exit
+Future<void> cancel() async {
+  try {
+    await process.stdin.close();
+  } on StateError {
+    // Stdin already closed
+  }
+  await process.exitCode; // Wait for graceful exit
+}
+
+// Codex CLI - send interrupt request, close stdin, await exit
+Future<void> cancel() async {
+  // Send interrupt request to cancel active turn
+  try {
+    writeToStdin({'jsonrpc': '2.0', 'method': 'interrupt', 'params': {'thread_id': threadId}});
+  } on StateError {
+    // Stdin already closed
+  }
+  try {
+    await process.stdin.close();
+  } on StateError {
+    // Stdin already closed
+  }
+  await process.exitCode; // Wait for graceful exit
+}
+
+// Gemini CLI - close stdin, await exit
+Future<void> cancel() async {
+  try {
+    await process.stdin.close();
+  } on StateError {
+    // Stdin already closed
+  }
+  await process.exitCode; // Wait for graceful exit
+}
+```
+
+**Why clean termination matters:**
+- Allows CLIs to persist session state properly
+- Ensures all buffered events are flushed
+- Prevents orphaned child processes
+- Avoids corrupted session history files
+
 ---
 
 ## 3. Claude Code Protocol
@@ -2855,8 +2913,20 @@ class StdioTransport {
     }
   }
 
+  /// Cancel the session using clean termination (see Section 2.4).
+  /// Do NOT use SIGTERM/SIGKILL - close stdin instead.
   Future<void> cancel() async {
-    _process?.kill(ProcessSignal.sigterm);
+    if (_process == null) return;
+
+    // Close stdin to signal end of session - CLI exits gracefully
+    try {
+      await _process!.stdin.close();
+    } on StateError {
+      // Stdin already closed
+    }
+
+    // Wait for the process to exit gracefully
+    await _process!.exitCode;
   }
 }
 ```
